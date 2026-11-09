@@ -1,0 +1,51 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const esbuild = require('../../ReceiveFromMasterGo/node_modules/esbuild');
+const output = esbuild.buildSync({
+  stdin: { contents: 'export * from "./ReceiveFromMasterGo/src/fontLoader"; export { state } from "./ReceiveFromMasterGo/src/state";', resolveDir: require('node:path').resolve(__dirname, '../..') },
+  bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent'
+});
+const moduleObject = { exports: {} };
+new Function('module', 'exports', output.outputFiles[0].text)(moduleObject, moduleObject.exports);
+const { state, rebuildAvailableFontIndex, resolveAvailableFontName } = moduleObject.exports;
+
+test('native legacy font spellings resolve their installed display families', () => {
+  const names = ['HarmonyOS Sans SC', 'Helvetica Neue', 'PingFang SC'];
+  state.documentFonts = names.map(family => ({fontName:{family,style:'Regular'}}));
+  rebuildAvailableFontIndex();
+  for (const [requested,family] of [['HarmonyOS_Sans_SC',names[0]],['HelveticaNeue',names[1]],['PingFangSC',names[2]]]) {
+    assert.deepEqual(resolveAvailableFontName({family:requested,style:'Regular'}), {family,style:'Regular'});
+  }
+  assert.equal(resolveAvailableFontName({family:'HarmonyOS_Sans_SC',style:'Bold'}), null);
+});
+
+test('localized PingFang names resolve the same installed face without crossing regional families', () => {
+  const families = [['苹方-简', 'PingFang SC'], ['苹方-繁', 'PingFang TC'], ['苹方-港', 'PingFang HK'], ['苹方-澳', 'PingFang MO']];
+  const styles = [['常规体', 'Regular'], ['中黑体', 'Medium'], ['中粗体', 'Semibold'], ['细体', 'Light'], ['纤细体', 'Thin'], ['极细体', 'Ultralight']];
+  state.documentFonts = families.flatMap(([, family]) => styles.map(([, style]) => ({ fontName: { family, style } })));
+  rebuildAvailableFontIndex();
+  for (const [localizedFamily, family] of families) for (const [localizedStyle, style] of styles) {
+    assert.deepEqual(resolveAvailableFontName({ family: localizedFamily, style: localizedStyle }), { family, style });
+  }
+  assert.equal(resolveAvailableFontName({ family: '不存在的字体', style: '常规体' }), null);
+  assert.equal(resolveAvailableFontName({ family: '苹方-简', style: '不存在的字重' }), null);
+  // An alias is not permission to substitute SC for a missing TC face.
+  state.documentFonts = [{ fontName: { family: 'PingFang SC', style: 'Regular' } }];
+  rebuildAvailableFontIndex();
+  assert.equal(resolveAvailableFontName({ family: '苹方-繁', style: '常规体' }), null);
+  assert.deepEqual(resolveAvailableFontName({ family: 'PingFang SC Regular', style: 'Pingfang sc regular' }), { family: 'PingFang SC', style: 'Regular' });
+  assert.deepEqual(resolveAvailableFontName({ family: 'PingFang SC', style: 'Pingfang sc regular' }), { family: 'PingFang SC', style: 'Regular' });
+  assert.equal(resolveAvailableFontName({ family: 'PingFang SC', style: 'Bold' }), null);
+});
+
+test('MasterGo short Chinese style names resolve installed faces and preserve missing weights', () => {
+  state.documentFonts = ['Regular', 'Medium', 'Bold'].map(style => ({fontName: {family: 'PingFang SC', style}}));
+  rebuildAvailableFontIndex();
+  for (const [localized, style] of [['常规', 'Regular'], ['中等', 'Medium'], ['粗体', 'Bold']]) {
+    assert.deepEqual(resolveAvailableFontName({family: 'PingFang SC', style: localized}), {family: 'PingFang SC', style});
+  }
+  state.documentFonts = [{fontName: {family: 'PingFang SC', style: 'Semibold'}}];
+  rebuildAvailableFontIndex();
+  assert.equal(resolveAvailableFontName({family: 'PingFang SC', style: '粗体'}), null);
+  assert.equal(resolveAvailableFontName({family: 'Unavailable Family', style: '常规'}), null);
+});

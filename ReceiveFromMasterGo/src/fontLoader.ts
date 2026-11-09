@@ -1,0 +1,260 @@
+import { state } from "./state";
+
+export function getFontKey(family: string, style: string): string {
+    return `${family}\n${style}`;
+}
+
+// figma.listAvailableFontsAsync() returns thousands of family×style entries.
+// resolveAvailableFontName() falls back to a full scan whenever the requested
+// font is not installed — which is the common case for MasterGo imports (CJK
+// fonts) and used to happen once per text node. Both caches below are derived
+// purely from state.documentFonts, and rebuildAvailableFontIndex() is the only
+// writer of the font index, so they are rebuilt/invalidated together and a
+// cached result is always identical to a fresh scan.
+type NormalizedFontEntry = { fontName: FontName; family: string; style: string };
+let normalizedFontEntries: NormalizedFontEntry[] = [];
+let fontResolutionCache: { [requestedKey: string]: FontName | null } = {};
+let indexedFontSource: typeof state.documentFonts | null = null;
+
+export async function ensureAvailableFontsLoaded(): Promise<void> {
+    if (state.documentFonts.length === 0) {
+        if (state.activeRestoreStats) {
+            state.activeRestoreStats.fontListLoadCount++;
+        }
+        state.documentFonts = await figma.listAvailableFontsAsync();
+        rebuildAvailableFontIndex();
+        return;
+    }
+
+    const firstFont = state.documentFonts[0].fontName;
+    if (state.documentFonts !== indexedFontSource ||
+        !state.availableFontKeys[getFontKey(firstFont.family, firstFont.style)]) {
+        rebuildAvailableFontIndex();
+    }
+}
+
+export async function refreshAvailableFonts(): Promise<void> {
+    if (state.activeRestoreStats) {
+        state.activeRestoreStats.fontListLoadCount++;
+    }
+    state.documentFonts = await figma.listAvailableFontsAsync();
+    rebuildAvailableFontIndex();
+}
+
+export function rebuildAvailableFontIndex(): void {
+    state.availableFontKeys = {};
+    normalizedFontEntries = [];
+    fontResolutionCache = {};
+    for (const font of state.documentFonts) {
+        const fontName = font.fontName;
+        state.availableFontKeys[getFontKey(fontName.family, fontName.style)] = true;
+        normalizedFontEntries.push({
+            fontName,
+            family: normalizeFontFamilyForMatch(fontName.family),
+            style: normalizeFontStyleForMatch(fontName.style)
+        });
+    }
+    indexedFontSource = state.documentFonts;
+}
+
+export async function loadFontCached(fontName: FontName): Promise<void> {
+    const key = getFontKey(fontName.family, fontName.style);
+    const existing = state.fontLoadPromises[key];
+    if (existing) {
+        if (state.activeRestoreStats) {
+            state.activeRestoreStats.fontLoadCacheHitCount++;
+        }
+        await existing;
+        return;
+    }
+
+    if (state.activeRestoreStats) {
+        state.activeRestoreStats.fontLoadRequestCount++;
+    }
+    // Failures stay cached for the session: a font Figma cannot load now will
+    // not load on the next text either, and re-asking costs a full font-catalog
+    // miss each time. With every PingFang segment missing, 0920's 752 instance
+    // texts re-tried the same rejected fonts until the page-end timeout fired.
+    // 刷新字体 / a new session resets the cache via state.reset().
+    const requestStats = state.activeRestoreStats;
+    const promise = figma.loadFontAsync(fontName).catch(error => {
+        if (requestStats) {
+            requestStats.fontLoadFailureCount++;
+        }
+        throw error;
+    });
+    // Keep a handled reference so a cached rejection never surfaces as an
+    // unhandled promise rejection when nobody awaits it again.
+    promise.catch(() => undefined);
+    state.fontLoadPromises[key] = promise;
+    await promise;
+}
+
+export function resolveAvailableFontName(requested: FontName): FontName | null {
+    const requestedKey = getFontKey(requested.family, requested.style);
+    if (state.availableFontKeys[requestedKey]) {
+        return requested;
+    }
+
+    const cached = fontResolutionCache[requestedKey];
+    if (cached !== undefined) return cached;
+
+    const requestedFamily = normalizeFontFamilyForMatch(requested.family);
+    const requestedStyle = normalizeFontStyleForMatch(requested.style);
+    let bestMatch: { fontName: FontName; score: number } | null = null;
+    for (const entry of normalizedFontEntries) {
+        const familyScore = getNormalizedFamilyMatchScore(requestedFamily, entry.family);
+        if (familyScore <= 0) continue;
+
+        // Some exported fonts put the full face name in both fields (e.g.
+        // "PingFang SC Regular" / "Pingfang sc regular"). Only strip the
+        // installed family when both requested fields agree exactly.
+        const styleForMatch = (requestedStyle === requestedFamily ||
+            (requestedFamily === entry.family && requestedStyle === entry.family + entry.style)) &&
+            requestedStyle.indexOf(entry.family) === 0
+            ? requestedStyle.slice(entry.family.length) : requestedStyle;
+        const styleScore = getNormalizedStyleMatchScore(styleForMatch, entry.style);
+        if (styleScore <= 0) continue;
+
+        const score = familyScore + styleScore;
+        if (!bestMatch || score > bestMatch.score) {
+            bestMatch = { fontName: entry.fontName, score };
+        }
+    }
+
+    const result = bestMatch ? bestMatch.fontName : null;
+    fontResolutionCache[requestedKey] = result;
+    return result;
+}
+
+function getNormalizedFamilyMatchScore(requested: string, available: string): number {
+    if (!requested || !available) return 0;
+    if (requested === available) return 100;
+    if (available.indexOf(requested) === 0 || requested.indexOf(available) === 0) return 80;
+    return 0;
+}
+
+function getNormalizedStyleMatchScore(requested: string, available: string): number {
+    if (!requested || !available) return 0;
+    if (requested === available) return 50;
+    return 0;
+}
+
+export function getFontFamilyMatchScore(requestedFamily: string, availableFamily: string): number {
+    return getNormalizedFamilyMatchScore(
+        normalizeFontFamilyForMatch(requestedFamily),
+        normalizeFontFamilyForMatch(availableFamily)
+    );
+}
+
+export function getFontStyleMatchScore(requestedStyle: string, availableStyle: string): number {
+    return getNormalizedStyleMatchScore(
+        normalizeFontStyleForMatch(requestedStyle),
+        normalizeFontStyleForMatch(availableStyle)
+    );
+}
+
+export function normalizeFontFamilyForMatch(value: string): string {
+    const normalized = String(value || "")
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "")
+        .replace(/[^a-z0-9\u3400-\u9fff]/g, "");
+    return FONT_FAMILY_ALIASES[normalized] || normalized;
+}
+
+// Verified against the English/zh-CN name records in Apple's PingFang.ttc.
+// Preserve unknown CJK names above: deleting them must not alias unrelated
+// families or turn every Chinese-only name into an empty match key.
+const FONT_FAMILY_ALIASES: { [family: string]: string } = {
+    "苹方简": "pingfangsc",
+    "苹方繁": "pingfangtc",
+    "苹方港": "pingfanghk",
+    "苹方澳": "pingfangmo"
+};
+
+const FONT_STYLE_ALIASES: { [style: string]: string } = {
+    "常规": "regular",
+    "中等": "medium",
+    "粗体": "bold",
+    "常规体": "regular",
+    "中黑体": "medium",
+    "中粗体": "semibold",
+    "细体": "light",
+    "纤细体": "thin",
+    "极细体": "extralight",
+    normal: "regular",
+    book: "regular",
+    roman: "regular",
+    regular: "regular",
+    400: "regular",
+    medium: "medium",
+    500: "medium",
+    semibold: "semibold",
+    demibold: "semibold",
+    600: "semibold",
+    bold: "bold",
+    700: "bold",
+    heavy: "heavy",
+    black: "black",
+    900: "black",
+    light: "light",
+    300: "light",
+    extralight: "extralight",
+    ultralight: "extralight",
+    200: "extralight",
+    thin: "thin",
+    100: "thin"
+};
+
+export function normalizeFontStyleForMatch(value: string): string {
+    let normalized = String(value || "")
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "")
+        .replace(/[^a-z0-9\u3400-\u9fff]/g, "");
+
+    // MasterGo may report a GB18030 charset-edition style ("55 Regular L3")
+    // while the installed face ships without the marker ("55 Regular"), or
+    // vice versa — same glyph design, so match them as one style.
+    const withoutCharsetMarker = normalized.replace(/l\d+$/, "");
+    if (withoutCharsetMarker) normalized = withoutCharsetMarker;
+
+    return FONT_STYLE_ALIASES[normalized] || normalized;
+}
+
+export function getNearbyAvailableFontsForLog(requested: FontName): FontName[] {
+    const requestedFamily = normalizeFontFamilyForMatch(requested.family);
+    const nearby: FontName[] = [];
+
+    for (const font of state.documentFonts) {
+        const family = normalizeFontFamilyForMatch(font.fontName.family);
+        if (
+            family.indexOf(requestedFamily) !== -1 ||
+            requestedFamily.indexOf(family) !== -1 ||
+            familiesShareWords(requested.family, font.fontName.family)
+        ) {
+            nearby.push(font.fontName);
+        }
+        if (nearby.length >= 20) break;
+    }
+
+    return nearby;
+}
+
+export function familiesShareWords(left: string, right: string): boolean {
+    const leftWords = splitFontFamilyWords(left);
+    const rightWords = splitFontFamilyWords(right);
+    let sharedCount = 0;
+
+    for (const word of leftWords) {
+        if (rightWords.indexOf(word) !== -1) sharedCount++;
+    }
+
+    return sharedCount >= Math.min(2, leftWords.length, rightWords.length);
+}
+
+export function splitFontFamilyWords(value: string): string[] {
+    return String(value || "")
+        .toLowerCase()
+        .split(/[\s_-]+/)
+        .filter(Boolean);
+}

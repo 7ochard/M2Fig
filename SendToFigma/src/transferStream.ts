@@ -1,0 +1,1015 @@
+import { captureConnectorSvg, clearConnectorSvgCache } from "./connectorSvgExporter";
+import { 
+    ExportOptions, ExportManifest, PageExportTarget, ExportPageIndex, 
+    LayerChunkAccumulator, ExportTransferState, ExportFile, ExportTransferFileKind,
+    ExportTransferTarget, ExportTransferAck, ExportFileAck
+} from "../../shared/types";
+import { state } from "./state";
+import { 
+    safeRead, isOutOfMemoryError, describeError, yieldToEventLoop 
+} from "../../shared/utils";
+import { 
+    collectSubtreeIterative, getSafeExportableChildren 
+} from "./nodeTraverser";
+import { loadAndStreamImageAsset, padNumber } from "./imageExporter";
+import { getNodeProbe } from "./serializers/universal";
+import { isReadableExportNode, prepareExportDependencies, recordUnreadableExportNode, resetExportDependencies } from "./exportDependencies";
+import { getExportStyles, getExportStyleDiagnostics, resetExportStyles } from "./styleExporter";
+import {
+    EXPORT_TRANSFER_CHUNK_SIZE,
+    EXPORT_TEXT_CHUNK_CHAR_LIMIT,
+    EXPORT_TRANSFER_YIELD_EVERY_CHUNKS,
+    EXPORT_FILE_YIELD_EVERY_FILES,
+    LAYER_CHUNK_MAX_RECORDS,
+    LAYER_CHUNK_MAX_BYTES,
+    PAGE_SEGMENT_TARGET_LAYERS,
+    EXPORT_SCAN_YIELD_EVERY_NODES,
+    EXPORT_FILE_ACK_TIMEOUT_MS,
+    EXPORT_TRANSFER_ACK_TIMEOUT_MS,
+    EXPORT_ASSET_YIELD_EVERY_ASSETS,
+} from "./exportConfig";
+
+// Feature flags and transfer-target identifiers (not tuning numbers).
+const EXPORT_TARGET_ZIP = "zip";
+const EXPORT_TARGET_LOCAL_RELAY = "local-relay";
+const SEND_TEXT_CHUNKS_AS_BYTES = true;
+const ENABLE_IMAGE_EXPORT = true;
+const ENABLE_SPLIT_EXPORT = true;
+
+// Tagged error for the UI transfer / zip-write boundary. The main thread treats
+// these as non-recoverable (it cannot retry a node when the UI side failed to
+// write or timed out), so we mark them with an explicit, stable `code` instead
+// of relying on substring matching of the human-readable message.
+export const UI_TRANSFER_ERROR_CODE = "UI_TRANSFER";
+
+export function uiTransferError(message: string): Error {
+    const error = new Error(message) as Error & { code?: string };
+    error.code = UI_TRANSFER_ERROR_CODE;
+    return error;
+}
+
+export function safeStringifyForLog(value: any): string {
+    try {
+        return JSON.stringify(value);
+    } catch (_) {
+        return "[Unstringifyable Object]";
+    }
+}
+
+export function getExportFileAckKey(transferId: string, index: number): string {
+    return `${transferId}:${index}`;
+}
+
+export function getExportTransferMessageMeta(transfer: ExportTransferState) {
+    return {
+        target: transfer.target,
+        relayUrl: transfer.relayUrl || ""
+    };
+}
+
+export function startExportTransfer(transfer: ExportTransferState) {
+    state.postUI({
+        type: "export-transfer-start",
+        transferId: transfer.transferId,
+        filename: transfer.filename,
+        fileCount: 0,
+        totalBytes: 0,
+        ...getExportTransferMessageMeta(transfer)
+    });
+}
+
+export function abortExportFileToUI(transfer: ExportTransferState, index: number, path: string, error: any) {
+    try {
+        state.postUI({
+            type: "export-file-abort",
+            transferId: transfer.transferId,
+            index,
+            path,
+            reason: safeStringifyForLog(describeError(error)),
+            ...getExportTransferMessageMeta(transfer)
+        });
+    } catch (abortError) {
+        state.logDiagnostic("warn", "[MasterGo2Figma] Unable to send export-file-abort", {
+            abortError: describeError(abortError),
+            originalError: describeError(error),
+            transfer: summarizeTransfer(transfer),
+            file: { index, path }
+        });
+    }
+}
+
+export function clearPendingExportFileAck(transfer: ExportTransferState, index: number) {
+    const key = getExportFileAckKey(transfer.transferId, index);
+    const resolver = state.exportFileAckResolvers[key];
+    if (!resolver) return;
+    clearTimeout(resolver.timeoutId);
+    delete state.exportFileAckResolvers[key];
+}
+
+export function waitForExportFileAck(transfer: ExportTransferState, index: number, path: string, timeoutMs = EXPORT_FILE_ACK_TIMEOUT_MS) {
+    return new Promise<ExportFileAck>((resolve, reject) => {
+        const key = getExportFileAckKey(transfer.transferId, index);
+        const timeoutId = setTimeout(() => {
+            delete state.exportFileAckResolvers[key];
+            reject(uiTransferError(`Timed out waiting for UI file ack: ${path}`));
+        }, timeoutMs) as any as number;
+        state.exportFileAckResolvers[key] = {
+            resolve,
+            reject,
+            timeoutId,
+            path
+        };
+    });
+}
+
+// Await the previous file's UI ack (single-slot pipeline). Called before the
+// next file starts and before the transfer completes, so at most one file ack
+// is ever outstanding. A failed/timed-out ack throws the same uiTransferError
+// as the old await-per-file flow — just surfaced one file later.
+export async function drainPendingExportFileAck(transfer: ExportTransferState) {
+    const pending = transfer.pendingFileAck;
+    if (!pending) return;
+    transfer.pendingFileAck = null;
+    await pending.promise;
+    state.noteExportFileTransfer({ path: pending.path }, pending.size, pending.totalChunks);
+}
+
+export async function streamExportFileToUI(transfer: ExportTransferState, file: ExportFile) {
+    await drainPendingExportFileAck(transfer);
+    const index = transfer.fileIndex++;
+    const canSendTextAsBytes = file.bytes === undefined && SEND_TEXT_CHUNKS_AS_BYTES && typeof TextEncoder !== "undefined";
+    const kind: ExportTransferFileKind = file.bytes !== undefined || canSendTextAsBytes ? "bytes" : "content";
+    const contentParts = file.contentParts || (file.content !== undefined ? [file.content] : []);
+    const size = kind === "bytes"
+        ? (file.bytes ? file.bytes.length : contentParts.reduce((sum, part) => sum + part.length, 0))
+        : contentParts.reduce((sum, part) => sum + part.length, 0);
+    const totalChunks = kind === "bytes"
+        ? Math.ceil(size / EXPORT_TRANSFER_CHUNK_SIZE)
+        : Math.max(1, Math.ceil(size / EXPORT_TEXT_CHUNK_CHAR_LIMIT));
+    let fileStarted = false;
+    let fileEnded = false;
+
+    try {
+        state.setExportDebugState({
+            phase: "transfer:file-start",
+            file: file.path,
+            transferId: transfer.transferId,
+            fileIndex: index,
+            fileSize: size,
+            streamedBytes: transfer.streamedBytes
+        });
+        state.postUI({
+            type: "export-file-start",
+            transferId: transfer.transferId,
+            index,
+            path: file.path,
+            kind,
+            size,
+            totalChunks,
+            ...getExportTransferMessageMeta(transfer)
+        });
+        fileStarted = true;
+
+        if (file.bytes !== undefined) {
+            const bytes = file.bytes || new Uint8Array(0);
+            for (let offset = 0, chunkIndex = 0; offset < bytes.length; offset += EXPORT_TRANSFER_CHUNK_SIZE, chunkIndex++) {
+                state.setExportDebugState({
+                    phase: "transfer:bytes-chunk",
+                    file: file.path,
+                    transferId: transfer.transferId,
+                    fileIndex: index,
+                    chunkIndex,
+                    fileSize: size,
+                    streamedBytes: transfer.streamedBytes
+                });
+                state.postUI({
+                    type: "export-file-chunk",
+                    transferId: transfer.transferId,
+                    index,
+                    chunkIndex,
+                    bytes: bytes.slice(offset, offset + EXPORT_TRANSFER_CHUNK_SIZE),
+                    ...getExportTransferMessageMeta(transfer)
+                });
+                transfer.postedChunks++;
+                if (transfer.postedChunks % EXPORT_TRANSFER_YIELD_EVERY_CHUNKS === 0) await yieldToHost();
+            }
+        } else {
+            let chunkIndex = 0;
+            const textEncoder = canSendTextAsBytes ? new TextEncoder() : null;
+            const postContentChunk = async (content: string) => {
+                state.setExportDebugState({
+                    phase: textEncoder ? "transfer:content-bytes-chunk" : "transfer:content-chunk",
+                    file: file.path,
+                    transferId: transfer.transferId,
+                    fileIndex: index,
+                    chunkIndex,
+                    fileSize: size,
+                    streamedBytes: transfer.streamedBytes
+                });
+                const message = textEncoder
+                    ? {
+                        type: "export-file-chunk",
+                        transferId: transfer.transferId,
+                        index,
+                        chunkIndex,
+                        bytes: textEncoder.encode(content),
+                        ...getExportTransferMessageMeta(transfer)
+                    }
+                    : {
+                        type: "export-file-chunk",
+                        transferId: transfer.transferId,
+                        index,
+                        chunkIndex,
+                        content,
+                        ...getExportTransferMessageMeta(transfer)
+                    };
+                state.postUI(message);
+                chunkIndex++;
+                transfer.postedChunks++;
+                if (transfer.postedChunks % EXPORT_TRANSFER_YIELD_EVERY_CHUNKS === 0) await yieldToHost();
+            };
+            let buffered = "";
+            for (const part of contentParts) {
+                let offset = 0;
+                while (offset < part.length) {
+                    const nextLength = Math.min(EXPORT_TEXT_CHUNK_CHAR_LIMIT - buffered.length, part.length - offset);
+                    buffered += part.slice(offset, offset + nextLength);
+                    offset += nextLength;
+                    if (buffered.length === EXPORT_TEXT_CHUNK_CHAR_LIMIT) {
+                        // A host bridge message is independently UTF-8 encoded.
+                        // Keep a high surrogate with its following code unit,
+                        // including when the pair straddles contentParts.
+                        const tail = buffered.charCodeAt(buffered.length - 1);
+                        if (tail >= 0xd800 && tail <= 0xdbff) {
+                            await postContentChunk(buffered.slice(0, -1));
+                            buffered = buffered.slice(-1);
+                        } else {
+                            await postContentChunk(buffered);
+                            buffered = "";
+                        }
+                    }
+                }
+            }
+            if (buffered || size === 0) await postContentChunk(buffered);
+        }
+
+        transfer.streamedBytes += size;
+        state.setExportDebugState({
+            phase: "transfer:file-end",
+            file: file.path,
+            transferId: transfer.transferId,
+            fileIndex: index,
+            fileSize: size,
+            streamedBytes: transfer.streamedBytes
+        });
+        const fileAckPromise = waitForExportFileAck(transfer, index, file.path);
+        // Mark the promise handled so a rejection (timeout / UI failure) that
+        // fires before the next drain never becomes an unhandled rejection;
+        // drainPendingExportFileAck awaits the original promise and rethrows.
+        fileAckPromise.catch(() => {});
+        state.postUI({ type: "export-file-end", transferId: transfer.transferId, index, ...getExportTransferMessageMeta(transfer) });
+        fileEnded = true;
+        // Do not await here: stash the ack and keep serializing the next file.
+        // Only file.path/size are kept (not the file object), so the streamed
+        // bytes stay collectible while the ack is in flight.
+        transfer.pendingFileAck = { promise: fileAckPromise, index, path: file.path, size, totalChunks };
+        if (index % EXPORT_FILE_YIELD_EVERY_FILES === 0) await yieldToHost();
+    } catch (error) {
+        state.logDiagnostic("error", "[MasterGo2Figma] Transfer file failed", {
+            error: describeError(error),
+            file: {
+                path: file.path,
+                kind,
+                index,
+                size,
+                started: fileStarted,
+                ended: fileEnded
+            },
+            debugState: state.exportDebugState
+        });
+        if (fileStarted && !fileEnded) abortExportFileToUI(transfer, index, file.path, error);
+        clearPendingExportFileAck(transfer, index);
+        throw error;
+    }
+}
+
+export function resolveExportFileAck(message: any) {
+    const transferId = String(message && message.transferId || "");
+    const index = Number(message && message.index);
+    const key = getExportFileAckKey(transferId, index);
+    const resolver = state.exportFileAckResolvers[key];
+    if (!resolver) return;
+    clearTimeout(resolver.timeoutId);
+    delete state.exportFileAckResolvers[key];
+
+    const ack: ExportFileAck = {
+        transferId,
+        index,
+        success: message && message.success === true,
+        path: typeof message.path === "string" ? message.path : resolver.path,
+        error: typeof message.error === "string" ? message.error : undefined,
+        pendingCount: typeof message.pendingCount === "number" ? message.pendingCount : undefined
+    };
+
+    if (ack.success) {
+        resolver.resolve(ack);
+    } else {
+        resolver.reject(uiTransferError(`UI failed to write ${ack.path || resolver.path}: ${ack.error || "unknown error"}; pending=${ack.pendingCount === undefined ? "unknown" : ack.pendingCount}`));
+    }
+}
+
+export function completeExportTransfer(
+    transfer: ExportTransferState,
+    manifest: ExportManifest,
+    isFinal = true,
+    stats: ExportManifest["stats"] = manifest.stats
+) {
+    state.postUI({
+        type: "export-transfer-complete",
+        transferId: transfer.transferId,
+        filename: transfer.filename,
+        fileCount: transfer.fileIndex,
+        totalBytes: transfer.streamedBytes,
+        stats,
+        isFinal,
+        ...getExportTransferMessageMeta(transfer)
+    });
+}
+
+export function resolveExportTransferAck(message: any) {
+    const transferId = String(message && message.transferId || "");
+    const resolver = state.exportTransferAckResolvers[transferId];
+    if (!resolver) return;
+    clearTimeout(resolver.timeoutId);
+    delete state.exportTransferAckResolvers[transferId];
+
+    const ack: ExportTransferAck = {
+        transferId,
+        success: message && message.success === true,
+        filename: typeof message.filename === "string" ? message.filename : undefined,
+        error: typeof message.error === "string" ? message.error : undefined,
+        pendingCount: typeof message.pendingCount === "number" ? message.pendingCount : undefined
+    };
+
+    if (ack.success) {
+        resolver.resolve(ack);
+    } else {
+        resolver.reject(uiTransferError(`UI zip failed for ${ack.filename || transferId}: ${ack.error || "unknown error"}; pending=${ack.pendingCount === undefined ? "unknown" : ack.pendingCount}`));
+    }
+}
+
+export function waitForExportTransferAck(transfer: ExportTransferState, timeoutMs = EXPORT_TRANSFER_ACK_TIMEOUT_MS) {
+    return new Promise<ExportTransferAck>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            delete state.exportTransferAckResolvers[transfer.transferId];
+            reject(uiTransferError(`Timed out waiting for UI zip ack: ${transfer.filename}`));
+        }, timeoutMs) as any as number;
+        state.exportTransferAckResolvers[transfer.transferId] = {
+            resolve,
+            reject,
+            timeoutId
+        };
+    });
+}
+
+export function yieldToHost() {
+    return new Promise<void>(resolve => setTimeout(resolve, 0));
+}
+
+export function createExportFilename(manifest: ExportManifest) {
+    const date = manifest.exportedAt.replace(/[:.]/g, "-");
+    return `mastergo2figma-${manifest.scope}-${date}.zip`;
+}
+
+export function createPageExportFilename(
+    scope: any, // ExportScope
+    page: PageNode,
+    pageIndex: number,
+    pageCount: number,
+    exportedAt: string,
+    segmentIndex = 0,
+    segmentCount = 1
+) {
+    const date = exportedAt.replace(/[:.]/g, "-");
+    const pageName = createFileSafeName(safeRead(() => page.name, ""), `page-${pageIndex + 1}`);
+    const segmentName = segmentCount > 1
+        ? `-segment-${padNumber(segmentIndex + 1)}-of-${padNumber(segmentCount)}`
+        : (segmentCount === 0 ? `-segment-${padNumber(segmentIndex + 1)}` : "");
+    return `mastergo2figma-${scope}-part-${padNumber(pageIndex + 1)}-of-${padNumber(pageCount)}${segmentName}-${pageName}-${date}.zip`;
+}
+
+export function createFileSafeName(value: string, fallback: string) {
+    const cleaned = String(value || "")
+        .trim()
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 48);
+    return cleaned || fallback;
+}
+
+export function getExportTargets(options: ExportOptions): PageExportTarget[] {
+    const pages = [...mg.document.children];
+    const selectedPageIds = new Set(options.pageIds);
+
+    if (options.scope === "all-pages") {
+        return pages
+            .filter(page => selectedPageIds.size === 0 || selectedPageIds.has(page.id))
+            .map(page => ({ page }));
+    }
+
+    if (options.scope === "partial-pages") {
+        if (selectedPageIds.size === 0) throw new Error("请至少选择一个页面");
+        return pages
+            .filter(page => selectedPageIds.has(page.id))
+            .map(page => ({ page }));
+    }
+
+    if (options.scope === "selected") {
+        const nodes = getTopLevelSelectedNodes(mg.document.currentPage.selection as SceneNode[]);
+        return [{ page: mg.document.currentPage, nodes }];
+    }
+
+    return [{ page: mg.document.currentPage }];
+}
+
+export function getTopLevelSelectedNodes(selection: SceneNode[]) {
+    const selectedSet = new Set(selection.map(node => node.id));
+    return selection.filter(node => !hasSelectedAncestor(node, selectedSet));
+}
+
+export function hasSelectedAncestor(node: SceneNode, selectedSet: Set<string>) {
+    let parent = node.parent as any;
+    while (parent && parent.type !== "PAGE" && parent.type !== "DOCUMENT") {
+        if (selectedSet.has(parent.id)) return true;
+        parent = parent.parent;
+    }
+    return false;
+}
+
+export function ensureTargetNodes(target: PageExportTarget): SceneNode[] {
+    if (!target.nodes) {
+        target.nodes = getSafeExportableChildren(target.page);
+    }
+    return target.nodes;
+}
+
+export function clearTargetNodes(target: PageExportTarget) {
+    if (target.nodes) {
+        target.nodes.length = 0;
+        delete target.nodes;
+    }
+}
+
+export function shouldSplitExportPackages(options: ExportOptions, targets: PageExportTarget[]): boolean {
+    if (!ENABLE_SPLIT_EXPORT) return false;
+    if (options.transferMode === "direct-zip") return false;
+    if (targets.length > 1) return true;
+    const nodes = ensureTargetNodes(targets[0]);
+    return nodes.length > 1;
+}
+
+export function createBaseExportManifest(options: ExportOptions, pageCount: number): ExportManifest {
+    // DocumentNode.name is the current file title in the official API:
+    // https://developers.mastergo.com/apis/documentNode.html#name
+    const documentName = safeRead(() => mg.document.name, "");
+    return {
+        schema: "mastergo2figma.package.v2",
+        version: 2,
+        source: "mastergo",
+        documentId: mg.documentId,
+        ...(typeof documentName === "string" && documentName.trim() ? { documentName } : {}),
+        exportedAt: new Date().toISOString(),
+        scope: options.scope,
+        pages: [],
+        assets: {},
+        stats: {
+            pageCount,
+            layerCount: 0,
+            imageAssetCount: 0,
+            missingImageAssetCount: 0
+        }
+    };
+}
+
+export function createExportTransfer(manifest: ExportManifest, filename?: string, options?: ExportOptions): ExportTransferState {
+    const transferId = `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const target: ExportTransferTarget = options && options.transferMode === "local-json-stream" ? EXPORT_TARGET_LOCAL_RELAY : EXPORT_TARGET_ZIP;
+    return {
+        transferId,
+        filename: filename || createExportFilename(manifest),
+        fileIndex: 0,
+        postedChunks: 0,
+        streamedBytes: 0,
+        target,
+        relayUrl: target === EXPORT_TARGET_LOCAL_RELAY && options ? options.relayUrl : undefined,
+        pendingFileAck: null
+    };
+}
+
+export function summarizeTransfer(transfer: ExportTransferState) {
+    return {
+        transferId: transfer.transferId,
+        filename: transfer.filename,
+        fileIndex: transfer.fileIndex,
+        postedChunks: transfer.postedChunks,
+        streamedBytes: transfer.streamedBytes
+    };
+}
+
+export function releaseExportPackageMemory(manifest: ExportManifest, imageAssetContext: any) {
+    manifest.pages = [];
+    manifest.assets = {};
+    imageAssetContext.assets.length = 0;
+    imageAssetContext.bySourceRef = {};
+}
+
+export async function appendLayerRecord(
+    recordJson: string,
+    pageIndex: ExportPageIndex,
+    chunk: LayerChunkAccumulator,
+    transfer: ExportTransferState
+) {
+    const nextBytes = recordJson.length + (chunk.recordJsons.length > 0 ? 1 : 0);
+    if (recordJson.length > LAYER_CHUNK_MAX_BYTES) {
+        state.logDiagnostic("warn", "[MasterGo2Figma] Single layer record exceeds chunk byte target", {
+            recordBytes: recordJson.length,
+            chunkMaxBytes: LAYER_CHUNK_MAX_BYTES,
+            page: pageIndex.name,
+            transfer: summarizeTransfer(transfer)
+        });
+    }
+    if (chunk.recordJsons.length > 0 &&
+        (chunk.recordJsons.length >= LAYER_CHUNK_MAX_RECORDS || chunk.bytes + nextBytes > LAYER_CHUNK_MAX_BYTES)) {
+        await flushLayerChunk(pageIndex, chunk, transfer);
+    }
+
+    chunk.recordJsons.push(recordJson);
+    chunk.bytes += nextBytes;
+
+    if (chunk.recordJsons.length >= LAYER_CHUNK_MAX_RECORDS || chunk.bytes >= LAYER_CHUNK_MAX_BYTES) {
+        await flushLayerChunk(pageIndex, chunk, transfer);
+    }
+}
+
+export async function flushLayerChunk(
+    pageIndex: ExportPageIndex,
+    chunk: LayerChunkAccumulator,
+    transfer: ExportTransferState
+) {
+    if (chunk.recordJsons.length === 0) return;
+
+    const fileIndex = chunk.chunkIndex++;
+    const path = `pages/${chunk.pageFolder}/layers/layers-${padNumber(fileIndex)}.json`;
+    const recordCount = chunk.recordJsons.length;
+    const byteCount = chunk.bytes;
+    state.setExportDebugState({
+        phase: "chunk:flush",
+        page: pageIndex.name,
+        file: path,
+        transferId: transfer.transferId,
+        fileIndex: transfer.fileIndex,
+        chunkIndex: fileIndex,
+        fileSize: byteCount,
+        streamedBytes: transfer.streamedBytes
+    });
+    // join(",") builds the record list in one pass; the previous per-record
+    // `,${json}` template copied every record string. Do NOT emit "," as its
+    // own contentPart — each part is chunked separately for postMessage, so a
+    // 1-char part would become its own bridge message.
+    const contentParts = [
+        `{"schema":"mastergo2figma.layers.v2","version":2,"pageId":${JSON.stringify(chunk.pageId)},"records":[`,
+        chunk.recordJsons.join(","),
+        "]}"
+    ];
+
+    await streamExportFileToUI(transfer, { path, contentParts });
+    pageIndex.layerChunks.push(path);
+    chunk.recordJsons = [];
+    chunk.bytes = 0;
+}
+
+export function getDocumentPageSummaries() {
+    return [...mg.document.children]
+        .map(page => ({
+            id: page.id,
+            name: page.name,
+            isCurrent: page.id === mg.document.currentPage.id,
+            childCount: page.children.length
+        }));
+}
+
+export function createPageFolderName(page: PageNode, index: number) {
+    const label = safeRead(() => page.name, "") || safeRead(() => page.id, "page");
+    return `page-${padNumber(index + 1)}-${slugifyPathPart(label)}`;
+}
+
+export function createLayerFileName(node: SceneNode, index: number) {
+    const label = safeRead(() => node.name, "") || safeRead(() => node.type, "untitled");
+    return `layer-${padNumber(index)}-${slugifyPathPart(label)}.json`;
+}
+
+export function slugifyPathPart(value: string) {
+    const normalized = value
+        .toLowerCase()
+        .trim()
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 32);
+    return normalized || "untitled";
+}
+
+export async function countNodes(node: any, parent: string | null = null, index = 0) {
+    if (!isReadableExportNode(node, parent, index)) return;
+    try {
+        await captureConnectorSvg(node);
+    } catch (error) {
+        if (isOutOfMemoryError(error)) throw error;
+        recordUnreadableExportNode(node, parent, index, error);
+        return;
+    }
+    state.totalNodes++;
+    state.processedNodes++; // countVisited equivalent
+    if (state.processedNodes % EXPORT_SCAN_YIELD_EVERY_NODES === 0) await yieldToEventLoop();
+    try {
+        let childNodes = getSafeExportableChildren(node);
+        for (let i = 0; i < childNodes.length; i++) {
+            const child = childNodes[i];
+            childNodes[i] = null as any;
+            await countNodes(child, safeRead(() => node.id, null), i);
+        }
+        childNodes = null as any;
+    } catch (error) {
+        const canMark = !!(error && typeof error === "object");
+        if (!canMark || !(error as any).__mastergo2figmaScanLogged) {
+            if (canMark) (error as any).__mastergo2figmaScanLogged = true;
+            state.logDiagnostic("error", "[MasterGo2Figma] Scan node failed", {
+                error: describeError(error),
+                node: getNodeProbe(node),
+                totalNodes: state.totalNodes
+            });
+        }
+        throw error;
+    }
+}
+
+export function createImageAssetContext() {
+    return {
+        bySourceRef: {} as { [sourceRef: string]: any },
+        assets: [] as any[],
+        missingImageAssetCount: 0
+    };
+}
+
+export async function streamPageRootSegmentToTransfer(
+    pageTarget: PageExportTarget,
+    pageIndex: number,
+    pageCount: number,
+    startRootIndex: number,
+    targetLayerCount: number,
+    manifest: ExportManifest,
+    transfer: ExportTransferState,
+    pageNameOverride?: string
+) {
+    const pageFolder = createPageFolderName(pageTarget.page, pageIndex);
+    const pageId = safeRead(() => pageTarget.page.id, `page-${pageIndex + 1}`);
+    const pageName = pageNameOverride || safeRead(() => pageTarget.page.name, "Untitled");
+    const pageIndexRecord: ExportPageIndex = {
+        schema: "mastergo2figma.page.v2",
+        version: 2,
+        id: pageId,
+        name: pageName,
+        folder: pageFolder,
+        rootNodeIds: [],
+        layerChunks: [],
+        layerCount: 0
+    };
+    if (pageTarget.isDependencyPage) pageIndexRecord.isDependencyPage = true;
+    const chunk: LayerChunkAccumulator = {
+        pageId,
+        pageFolder,
+        chunkIndex: 1,
+        recordJsons: [],
+        bytes: 0,
+        writtenNodeIds: {}
+    };
+
+    const nodes = ensureTargetNodes(pageTarget);
+    let rootIndex = startRootIndex;
+    while (rootIndex < nodes.length) {
+        const node = nodes[rootIndex];
+        pageIndexRecord.rootNodeIds.push(safeRead(() => node.id, `root-${pageIndex + 1}-${rootIndex + 1}`));
+        await collectSubtreeIterative(node, pageTarget.page, pageFolder, null, rootIndex, pageIndexRecord, chunk, transfer, "root");
+        rootIndex++;
+        if (pageIndexRecord.layerCount >= targetLayerCount) break;
+    }
+
+    await flushLayerChunk(pageIndexRecord, chunk, transfer);
+
+    const pageFile = `pages/${pageFolder}/page.json`;
+    await streamExportFileToUI(transfer, {
+        path: pageFile,
+        content: JSON.stringify(pageIndexRecord)
+    });
+
+    manifest.pages.push({
+        id: pageIndexRecord.id,
+        name: pageIndexRecord.name,
+        folder: pageFolder,
+        pageFile,
+        layerCount: pageIndexRecord.layerCount,
+        ...(pageTarget.isDependencyPage ? { isDependencyPage: true } : {})
+    });
+    manifest.stats.layerCount += pageIndexRecord.layerCount;
+
+    return {
+        nextRootIndex: rootIndex,
+        rootCount: rootIndex - startRootIndex,
+        layerCount: pageIndexRecord.layerCount
+    };
+}
+
+export async function streamPageExportToTransfer(
+    pageTarget: PageExportTarget,
+    pageIndex: number,
+    pageCount: number,
+    manifest: ExportManifest,
+    transfer: ExportTransferState,
+    pageNameOverride?: string
+) {
+    const pageFolder = createPageFolderName(pageTarget.page, pageIndex);
+    const pageId = safeRead(() => pageTarget.page.id, `page-${pageIndex + 1}`);
+    const pageName = pageNameOverride || safeRead(() => pageTarget.page.name, "Untitled");
+    const nodes = ensureTargetNodes(pageTarget);
+    const pageIndexRecord: ExportPageIndex = {
+        schema: "mastergo2figma.page.v2",
+        version: 2,
+        id: pageId,
+        name: pageName,
+        folder: pageFolder,
+        rootNodeIds: [],
+        layerChunks: [],
+        layerCount: 0
+    };
+    if (pageTarget.isDependencyPage) pageIndexRecord.isDependencyPage = true;
+    const chunk: LayerChunkAccumulator = {
+        pageId,
+        pageFolder,
+        chunkIndex: 1,
+        recordJsons: [],
+        bytes: 0,
+        writtenNodeIds: {}
+    };
+
+    for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index];
+        pageIndexRecord.rootNodeIds.push(safeRead(() => node.id, `root-${pageIndex + 1}-${index + 1}`));
+        await collectSubtreeIterative(node, pageTarget.page, pageFolder, null, index, pageIndexRecord, chunk, transfer, "root");
+    }
+    await flushLayerChunk(pageIndexRecord, chunk, transfer);
+
+    const pageFile = `pages/${pageFolder}/page.json`;
+    await streamExportFileToUI(transfer, {
+        path: pageFile,
+        content: JSON.stringify(pageIndexRecord)
+    });
+    manifest.pages.push({
+        id: pageIndexRecord.id,
+        name: pageIndexRecord.name,
+        folder: pageFolder,
+        pageFile,
+        layerCount: pageIndexRecord.layerCount,
+        ...(pageTarget.isDependencyPage ? { isDependencyPage: true } : {})
+    });
+    manifest.stats.layerCount += pageIndexRecord.layerCount;
+}
+
+export async function streamImageAssetsToTransfer(
+    imageAssetContext: any,
+    manifest: ExportManifest,
+    transfer: ExportTransferState
+) {
+    if (!ENABLE_IMAGE_EXPORT) return;
+    let streamedAssets = 0;
+    for (const asset of imageAssetContext.assets) {
+        await loadAndStreamImageAsset(asset, imageAssetContext, transfer);
+        manifest.assets[asset.key] = {
+            key: asset.key,
+            fileName: asset.fileName,
+            path: asset.path,
+            missing: asset.missing || undefined
+        };
+        if (asset.bytes && !asset.missing) manifest.stats.imageAssetCount++;
+        // 显式断开强引用；大图在 streamExportFileToUI 内部已按 chunk yield，
+        // 这里按批次 yield 即可，避免小图场景每个资源空转一次 setTimeout(0)。
+        asset.bytes = null;
+        streamedAssets++;
+        if (streamedAssets % EXPORT_ASSET_YIELD_EVERY_ASSETS === 0) await yieldToHost();
+    }
+    manifest.stats.missingImageAssetCount = imageAssetContext.missingImageAssetCount;
+}
+
+async function streamExportStylesToTransfer(manifest: ExportManifest, transfer: ExportTransferState): Promise<void> {
+    const styles = getExportStyles();
+    if (styles.length > 0) {
+        await streamExportFileToUI(transfer, { path: "styles.json", content: JSON.stringify({ styles }) });
+    }
+    manifest.diagnostics = [...(manifest.diagnostics || []), ...getExportStyleDiagnostics()];
+    if (manifest.diagnostics.length > 0) {
+        state.logDiagnostic("warn", "[MasterGo2Figma] Export fidelity diagnostics", manifest.diagnostics);
+    }
+}
+
+export async function streamPageRootSegmentsToPackages(
+    options: ExportOptions,
+    pageTarget: PageExportTarget,
+    pageIndex: number,
+    pageCount: number,
+    aggregateManifest: ExportManifest
+) {
+    const pageName = safeRead(() => pageTarget.page.name, "Untitled");
+    let rootIndex = 0;
+    let segmentIndex = 0;
+    const nodes = ensureTargetNodes(pageTarget);
+    const useSegmentNames = nodes.length > 1;
+
+    while (rootIndex < nodes.length) {
+        resetExportStyles();
+        const imageAssetContext = createImageAssetContext();
+        state.activeImageAssetContext = imageAssetContext;
+        const manifest = createBaseExportManifest(options, 1);
+        const filename = createPageExportFilename(
+            options.scope,
+            pageTarget.page,
+            pageIndex,
+            pageCount,
+            manifest.exportedAt,
+            segmentIndex,
+            useSegmentNames ? 0 : 1
+        );
+        const transfer = createExportTransfer(manifest, filename, options);
+        startExportTransfer(transfer);
+
+        const segmentLabel = useSegmentNames ? ` segment ${segmentIndex + 1}` : "";
+        const pageNameOverride = useSegmentNames ? `${pageName} ${segmentIndex + 1}` : undefined;
+        const startRootIndex = rootIndex;
+
+        state.noteExportSplitPackage();
+        const segmentResult = await state.timeExportPhase("exportMs", async () => await streamPageRootSegmentToTransfer(
+            pageTarget,
+            pageIndex,
+            pageCount,
+            rootIndex,
+            PAGE_SEGMENT_TARGET_LAYERS,
+            manifest,
+            transfer,
+            pageNameOverride
+        ));
+        rootIndex = segmentResult.nextRootIndex;
+        await streamExportStylesToTransfer(manifest, transfer);
+
+        state.postProgressUI({
+            type: "progress",
+            phase: "assets",
+            current: state.processedNodes,
+            total: 0,
+            label: `正在导出图片资源 ${pageIndex + 1}/${pageCount}${segmentLabel}...`
+        });
+        await state.timeExportPhase("assetMs", async () => {
+            await streamImageAssetsToTransfer(imageAssetContext, manifest, transfer);
+        });
+
+        await state.timeExportPhase("manifestMs", async () => {
+            await streamExportFileToUI(transfer, {
+                path: "manifest.json",
+                content: JSON.stringify(manifest)
+            });
+        });
+
+        const pageSummary = manifest.pages[0];
+        if (pageSummary) aggregateManifest.pages.push(pageSummary);
+        aggregateManifest.stats.pageCount = aggregateManifest.pages.length;
+        aggregateManifest.stats.layerCount += manifest.stats.layerCount;
+        aggregateManifest.stats.imageAssetCount += manifest.stats.imageAssetCount;
+        aggregateManifest.stats.missingImageAssetCount += manifest.stats.missingImageAssetCount;
+
+        const isFinal = pageIndex === pageCount - 1 && rootIndex >= nodes.length;
+        // Surface the last file's ack failure before declaring this package complete.
+        await drainPendingExportFileAck(transfer);
+        const ackPromise = waitForExportTransferAck(transfer);
+        completeExportTransfer(transfer, manifest, isFinal, isFinal ? aggregateManifest.stats : manifest.stats);
+        releaseExportPackageMemory(manifest, imageAssetContext);
+        state.activeImageAssetContext = null;
+        await state.timeExportPhase("ackMs", async () => await ackPromise);
+        segmentIndex++;
+        await yieldToHost();
+    }
+}
+
+export async function streamJsonExportPackage(options: ExportOptions): Promise<ExportManifest> {
+    clearConnectorSvgCache();
+    resetExportStyles();
+    state.totalNodes = 0;
+    state.processedNodes = 0;
+    const previousImageAssetContext = state.activeImageAssetContext;
+
+    try {
+        const scanStartedAt = Date.now();
+        state.postProgressUI({ type: "progress", phase: "scan", current: 0, total: 0, label: "正在扫描图层和组件依赖..." });
+        const dependencyPlan = await prepareExportDependencies(getExportTargets(options), getSafeExportableChildren);
+        const targets = dependencyPlan.targets;
+        const rootCount = dependencyPlan.rootCount;
+        if (rootCount === 0) {
+            throw new Error(options.scope === "selected" ? "请先选择要导出的图层" : "没有可导出的图层");
+        }
+
+        state.resetExportStats(options, targets.length, rootCount);
+        if (state.activeExportStats) {
+            state.activeExportStats.startedAt = scanStartedAt;
+            state.activeExportStats.scanMs = Date.now() - scanStartedAt;
+        }
+        state.totalNodes = dependencyPlan.nodeCount;
+        state.postProgressUI({ type: "progress", phase: "prepare", current: 0, total: state.totalNodes, label: "准备分块导出 JSON..." });
+
+        const imageAssetContext = createImageAssetContext();
+        state.activeImageAssetContext = imageAssetContext;
+        const manifest = createBaseExportManifest(options, targets.length);
+        manifest.diagnostics = dependencyPlan.diagnostics;
+        const transfer = createExportTransfer(manifest, undefined, options);
+        startExportTransfer(transfer);
+
+        await state.timeExportPhase("exportMs", async () => {
+            for (let pageIndex = 0; pageIndex < targets.length; pageIndex++) {
+                const pageTarget = targets[pageIndex];
+                ensureTargetNodes(pageTarget);
+                await streamPageExportToTransfer(pageTarget, pageIndex, targets.length, manifest, transfer);
+                clearTargetNodes(pageTarget);
+                targets[pageIndex] = null as any;
+            }
+        });
+
+        await streamExportStylesToTransfer(manifest, transfer);
+        state.postProgressUI({ type: "progress", phase: "assets", current: state.processedNodes, total: state.totalNodes, label: "正在导出图片资源..." });
+        await state.timeExportPhase("assetMs", async () => {
+            await streamImageAssetsToTransfer(imageAssetContext, manifest, transfer);
+        });
+
+        await state.timeExportPhase("manifestMs", async () => {
+            await streamExportFileToUI(transfer, {
+                path: "manifest.json",
+                content: JSON.stringify(manifest)
+            });
+        });
+
+        state.postProgressUI({ type: "progress", phase: "complete", current: state.processedNodes, total: state.processedNodes, label: "JSON 已生成，正在准备下载..." });
+        // Surface the last file's ack failure before declaring the transfer complete.
+        await drainPendingExportFileAck(transfer);
+        const ackPromise = waitForExportTransferAck(transfer);
+        completeExportTransfer(transfer, manifest);
+        await state.timeExportPhase("ackMs", async () => await ackPromise);
+        state.logExportPerformanceSummary("complete", manifest);
+        return manifest;
+    } catch (error) {
+        state.logExportPerformanceSummary("failed");
+        state.logDiagnostic("error", "[MasterGo2Figma] Export transfer failed", {
+            error: describeError(error),
+            debugState: state.exportDebugState
+        });
+        throw error;
+    } finally {
+        state.activeImageAssetContext = previousImageAssetContext;
+        clearConnectorSvgCache();
+        resetExportDependencies();
+        resetExportStyles();
+    }
+}
+
+export async function streamSplitJsonExportPackages(
+    options: ExportOptions,
+    targets: PageExportTarget[]
+): Promise<ExportManifest> {
+    const aggregateManifest = createBaseExportManifest(options, targets.length);
+    let rootCount = 0;
+    for (const target of targets) {
+        rootCount += ensureTargetNodes(target).length;
+        clearTargetNodes(target);
+    }
+    state.postProgressUI({
+        type: "progress",
+        phase: "prepare",
+        current: 0,
+        total: 0,
+        label: "正在按页面分包导出..."
+    });
+
+    for (let pageIndex = 0; pageIndex < targets.length; pageIndex++) {
+        const pageTarget = targets[pageIndex];
+        ensureTargetNodes(pageTarget);
+        await streamPageRootSegmentsToPackages(options, pageTarget, pageIndex, targets.length, aggregateManifest);
+        clearTargetNodes(pageTarget);
+        targets[pageIndex] = null as any;
+    }
+
+    return aggregateManifest;
+}

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <title>M2Fig · 本地迁移工具</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="window-bar">
+      <div class="brand"><img src="assets/m2fig-logo-24.svg" width="24" height="24" alt="" /><span>M2Fig</span></div>
+      <span class="version" id="version">本地迁移工具</span>
+    </div>
+    <div class="app">
+      <main class="workspace">
+        <form class="export-form" id="export-form" novalidate>
+          <section class="source-panel" aria-labelledby="export-heading">
+            <h2 id="export-heading">导出任务</h2>
+            <div class="source-field">
+              <div class="source-field-info">
+                <label for="links">MasterGo 文件链接</label>
+                <p class="hint" id="links-hint">每行一个链接，支持文件链接与邀请链接。</p>
+                <details class="source-note">
+                  <summary><img src="assets/details-marker.svg" width="5" height="7" alt="" /><span>源文件需要先在桌面客户端打开吗？</span></summary>
+                  <p id="source-hint">首次导出前，请在已登录的 MasterGo 桌面客户端打开源文件一次。本工具读取客户端快照；仅在浏览器打开链接不保证生成桌面缓存，快照也不保证是云端最新版本。</p>
+                </details>
+              </div>
+              <textarea id="links" name="links" rows="3" spellcheck="false" placeholder="https://mastergo.com/file/…" aria-describedby="links-hint source-hint"></textarea>
+            </div>
+            <section class="records" aria-labelledby="records-heading">
+              <h2 id="records-heading">处理记录</h2>
+              <div class="log-container">
+                <p class="log-empty" id="log-empty">开始导出后，这里会显示处理进度、生成结果与需要注意的问题。</p>
+                <pre id="log" tabindex="0" role="log" aria-label="本次导出处理记录" aria-live="off" hidden></pre>
+              </div>
+            </section>
+          </section>
+
+          <section class="output-panel" aria-labelledby="output-heading">
+            <h2 id="output-heading">保存目录</h2>
+            <div class="directory-row">
+              <input id="output-dir" name="outputDir" type="text" readonly placeholder="选择迁移 ZIP 的保存位置" aria-labelledby="output-heading" aria-describedby="output-hint" />
+              <button class="button button-secondary" id="choose-directory" type="button" disabled>选择目录</button>
+            </div>
+            <div class="task-status" id="task-status" data-state="idle">
+              <p id="status" role="status" aria-live="polite">正在连接本地导出工具…</p>
+              <div class="progress" id="progress" role="progressbar" aria-label="正在导出，耗时取决于文件大小" hidden><span></span></div>
+            </div>
+            <div class="export-actions">
+              <button class="button button-primary" id="start-export" type="submit" disabled>开始导出 ZIP</button>
+              <button class="button button-secondary" id="open-output" type="button" disabled>打开保存目录</button>
+            </div>
+            <div class="output-notes hint" id="output-hint">
+              <p>每个源文件单独生成同名 v2 ZIP；已有文件不会被覆盖。</p>
+              <p>迁移 ZIP 是设计数据、无需解压；插件安装 ZIP 不能用于导入。</p>
+            </div>
+          </section>
+        </form>
+
+        <aside class="import-guide" aria-labelledby="guide-heading">
+          <details class="guide-card" open>
+            <summary><h2 id="guide-heading">在 Figma 中导入</h2></summary>
+            <ol class="guide-flow">
+              <li><span>在 Figma 打开同名设计文件</span></li>
+              <li><span>Plugins</span></li>
+              <li><span>Development</span></li>
+              <li><span>Import plugin from manifest…</span></li>
+              <li><span>确认页脚为 M2Fig（本地 r4）</span></li>
+              <li><span>启用 ZIP 导入并选择刚导出的源文件 ZIP</span></li>
+            </ol>
+            <div class="plugin-location">
+              <span class="plugin-label">插件 manifest 位置</span>
+              <code id="plugin-path" tabindex="0">正在读取本地插件位置…</code>
+              <button class="button button-ghost button-small" id="copy-plugin" type="button" disabled>复制路径</button>
+            </div>
+          </details>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>
