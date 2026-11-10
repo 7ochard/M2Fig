@@ -1,0 +1,633 @@
+import { state } from "../state";
+import { closeCoincidentBooleanContour } from "./booleanContours";
+import { safeResize, safeSet } from "../../../shared/utils";
+import { ImportLayerRecord } from "../../../shared/types";
+import { appendRestoredNode, safeRemove, hasUsableVectorNetwork } from "../nodeCreator";
+import { normalizeImageFills, normalizeImageStrokes, safeSetFills, safeSetStrokes } from "./universal";
+
+export function shouldRestoreBooleanVectorAsFrame(data: any, layerRecord: ImportLayerRecord): boolean {
+    if (!data || data.sourceType !== "BOOLEAN_OPERATION") return false;
+    if (data.receiveCreateOverride || data.svgFallback) return false;
+    if (data.type !== "VECTOR" && data.restoreType !== "VECTOR") return false;
+    if (!layerRecord.childIds || layerRecord.childIds.length === 0) return false;
+    return !hasUsableVectorNetwork(data.vectorNetwork);
+}
+
+export function shouldRestoreBooleanOperationTree(data: any, layerRecord?: ImportLayerRecord): boolean {
+    if (!data) return false;
+    const hasBooleanChildren = data.sourceType === "BOOLEAN_OPERATION" &&
+        !!layerRecord &&
+        Array.isArray(layerRecord.childIds) &&
+        layerRecord.childIds.length > 0;
+    return data.sourceType === "BOOLEAN_OPERATION" &&
+        (hasBooleanChildren ||
+            data.type === "BOOLEAN_OPERATION" ||
+            data.restoreType === "BOOLEAN_OPERATION" ||
+            data.receiveCreateOverride === "BOOLEAN_OPERATION");
+}
+
+export function normalizeBooleanOperation(value: any): "UNION" | "SUBTRACT" | "INTERSECT" | "EXCLUDE" | null {
+    if (value === "UNION" || value === "SUBTRACT" || value === "INTERSECT" || value === "EXCLUDE") {
+        return value;
+    }
+    return null;
+}
+
+export function clearGeometryPaint(geometry: any): any {
+    if (!geometry || typeof geometry !== "object") return geometry;
+    return {
+        ...geometry,
+        fills: [],
+        strokes: [],
+        strokeWeight: 0,
+        strokeTopWeight: undefined,
+        strokeBottomWeight: undefined,
+        strokeLeftWeight: undefined,
+        strokeRightWeight: undefined
+    };
+}
+
+export function createBooleanFrameFallbackProps(data: any): any {
+    return {
+        ...data,
+        type: "FRAME",
+        restoreType: "FRAME",
+        receiveCreateOverride: "FRAME",
+        booleanFallback: "frameContainer",
+        clipsContent: false,
+        geometry: clearGeometryPaint(data.geometry)
+    };
+}
+
+export function createUntransformedContainerShellProps(data: any): any {
+    const props = createBooleanFrameFallbackProps(data);
+    delete props.layout;
+    delete props.constraints;
+    return props;
+}
+
+export function createContainerShellFrameProps(data: any): any {
+    return hasNonTranslationTransform(data?.layout) ?
+        createUntransformedContainerShellProps(data) :
+        createBooleanFrameFallbackProps(data);
+}
+
+export function createFinalizedContainerProps(data: any, preserveLayout = false): any {
+    const props = { ...data };
+    if (!preserveLayout) {
+        // figma.group() derives x/y/size for a translation-only GroupNode, but
+        // it does not replace the group's role as an auto-layout child. Keep
+        // only parent-item layout semantics for the deferred layout pass.
+        const layout = data && data.layout;
+        if (layout) {
+            const parentLayout: any = {};
+            for (const key of ["layoutAlign", "layoutGrow", "layoutPositioning"]) {
+                if (layout[key] !== undefined) parentLayout[key] = layout[key];
+            }
+            // An ABSOLUTE child is the one case where the derived position does
+            // NOT survive: the deferred pass gives the parent its layoutMode
+            // first, which snaps every child (including this group) to a flow
+            // slot, and only the LATER pass flips it back to ABSOLUTE. With x/y
+            // dropped there is nothing left to restore the position with — the
+            // 找桩充电 card's map texture, pinned at x 170.76, ended up at the
+            // 12.93 padding corner behind the tab row.
+            if (layout.layoutPositioning === "ABSOLUTE") {
+                if (layout.x !== undefined) parentLayout.x = layout.x;
+                if (layout.y !== undefined) parentLayout.y = layout.y;
+            }
+            props.layout = Object.keys(parentLayout).length > 0 ? parentLayout : undefined;
+        }
+    }
+    return props;
+}
+
+export function hasNonTranslationTransform(layout: any): boolean {
+    const transform = layout && layout.relativeTransform;
+    if (!hasFiniteTransform(transform)) return false;
+
+    return Math.abs(transform[0][0] - 1) > 0.0001 ||
+        Math.abs(transform[0][1]) > 0.0001 ||
+        Math.abs(transform[1][0]) > 0.0001 ||
+        Math.abs(transform[1][1] - 1) > 0.0001;
+}
+
+function hasFiniteTransform(transform: any): boolean {
+    return Array.isArray(transform) &&
+        Array.isArray(transform[0]) &&
+        Array.isArray(transform[1]) &&
+        Number.isFinite(transform[0][0]) &&
+        Number.isFinite(transform[0][1]) &&
+        Number.isFinite(transform[0][2]) &&
+        Number.isFinite(transform[1][0]) &&
+        Number.isFinite(transform[1][1]) &&
+        Number.isFinite(transform[1][2]);
+}
+
+// ---- Native component-set restoration ----------------------------------------
+// Figma creates component sets by combining component children as variants. Use a
+// temporary frame so descendants can be restored normally, then replace that shell
+// with the native ComponentSetNode.
+
+export function shouldRestoreComponentSetNode(data: any): boolean {
+    if (!data) return false;
+    if (data.receiveCreateOverride === "SVG" || data.svgFallback) return false;
+    return data.sourceType === "COMPONENT_SET" &&
+        (data.type === "COMPONENT_SET" || data.restoreType === "COMPONENT_SET" || data.receiveCreateOverride === "COMPONENT_SET");
+}
+
+export async function restoreComponentSetNode(
+    nodeProps: any,
+    parent: PageNode | SceneNode,
+    layerRecord: ImportLayerRecord,
+    layers: { [id: string]: ImportLayerRecord },
+    restoredBefore: number,
+    totalNodes: number,
+    restoreNodeCallback: (nodeId: string, parent: PageNode | SceneNode, layers: { [id: string]: ImportLayerRecord }, restoredBefore: number, totalNodes: number) => Promise<number>,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>,
+    maybeReportProgressCallback: (current: number, total: number) => Promise<void>
+): Promise<number> {
+    const shell = figma.createFrame();
+    state.recordNodeCreation("container-shell");
+    const childIds = nodeProps.omitChildrenOnRestore ? [] : (layerRecord.childIds || []);
+    const shellProps = createBooleanFrameFallbackProps(nodeProps);
+    let appended = false;
+
+    try {
+        if (!appendRestoredNode(parent, shell)) return 0;
+        appended = true;
+        await applyPropertiesCallback(shell as any, shellProps);
+    } catch (error) {
+        console.warn("Unable to create component set restore shell:", nodeProps?.name || layerRecord.name, error);
+        if (appended) safeRemove(shell);
+        return 0;
+    }
+
+    let restoredCount = 1;
+    await maybeReportProgressCallback(restoredBefore + restoredCount, totalNodes);
+
+    for (const childId of childIds) {
+        restoredCount += await restoreNodeCallback(childId, shell, layers, restoredBefore + restoredCount, totalNodes);
+    }
+
+    await finalizeComponentSetShell(shell, nodeProps, applyPropertiesCallback);
+    return restoredCount;
+}
+
+export async function finalizeComponentSetShell(
+    shell: FrameNode,
+    data: any,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>
+) {
+    const parent = shell.parent;
+    if (!parent || !("insertChild" in parent)) {
+        safeSet(shell, "name", data.name);
+        return;
+    }
+
+    const components = shell.children.filter((child): child is ComponentNode => child.type === "COMPONENT");
+    if (components.length < 1) {
+        console.warn("Unable to create component set because it has no component children:", data?.name || data?.id || "Untitled");
+        safeSet(shell, "name", data.name);
+        return;
+    }
+
+    try {
+        const parentIndex = parent.children.indexOf(shell);
+        for (let index = 0; index < components.length; index++) {
+            const component = components[index];
+            safeSet(component, "name", createFigmaVariantName(component.name, index));
+        }
+
+        const componentSet = figma.combineAsVariants(
+            components,
+            parent as BaseNode & ChildrenMixin,
+            parentIndex >= 0 ? parentIndex : parent.children.length
+        );
+        state.recordNodeCreation("component-set");
+        safeRemove(shell);
+        await applyPropertiesCallback(componentSet as any, data);
+        restoreComponentSetChildLayouts(componentSet);
+    } catch (error) {
+        console.warn("Unable to create native component set, keeping frame fallback:", data?.name || data?.id || "Untitled", error);
+        safeSet(shell, "name", data.name);
+    }
+}
+
+export function createFigmaVariantName(name: string, index: number): string {
+    const fallback = `Variant ${index + 1}`;
+    if (!name) return `Property 1=${fallback}`;
+
+    // Normalize EVERY comma-separated axis, not just the first one. MasterGo
+    // appends [aN] order markers per property key (Size[a0]=Small,
+    // Type[a1]=Secondary); stripping only the first pair leaves sibling
+    // variants with mismatched property-name sets (Type[a0] vs Type[a1]) and
+    // figma.combineAsVariants throws, degrading the whole set to a frame.
+    if (name.indexOf("=") > 0) {
+        const pairs: (string | null)[] = name.split(",").map(pair => {
+            const equalsIndex = pair.indexOf("=");
+            if (equalsIndex <= 0 || equalsIndex >= pair.length - 1) return null;
+            const key = pair.slice(0, equalsIndex).replace(/(\[[^\]]*\])+\s*$/, "");
+            return `${sanitizeVariantPropertyName(key)}=${sanitizeVariantValue(pair.slice(equalsIndex + 1), fallback)}`;
+        });
+        if (pairs.every(pair => pair !== null)) return (pairs as string[]).join(", ");
+    }
+
+    return `Property 1=${sanitizeVariantValue(name, fallback)}`;
+}
+
+function sanitizeVariantPropertyName(value: string): string {
+    const trimmed = String(value || "").trim();
+    return trimmed || "Property 1";
+}
+
+function sanitizeVariantValue(value: string, fallback: string): string {
+    const trimmed = String(value || "").trim();
+    return trimmed || fallback;
+}
+
+function restoreComponentSetChildLayouts(componentSet: ComponentSetNode) {
+    for (const child of componentSet.children) {
+        if (child.type !== "COMPONENT") continue;
+
+        const layout = state.restoredLayoutByNodeId[child.id];
+        if (layout) {
+            if (layout.width !== undefined && layout.height !== undefined) {
+                safeResize(child, layout.width, layout.height);
+            }
+            if (hasFiniteRelativeTransform(layout)) {
+                safeSet(child, "relativeTransform", layout.relativeTransform);
+            } else {
+                if (layout.x !== undefined) safeSet(child, "x", layout.x);
+                if (layout.y !== undefined) safeSet(child, "y", layout.y);
+            }
+        }
+    }
+}
+
+function hasFiniteRelativeTransform(layout: any): boolean {
+    return Array.isArray(layout?.relativeTransform) &&
+        Array.isArray(layout.relativeTransform[0]) &&
+        Array.isArray(layout.relativeTransform[1]) &&
+        Number.isFinite(layout.relativeTransform[0][0]) &&
+        Number.isFinite(layout.relativeTransform[0][1]) &&
+        Number.isFinite(layout.relativeTransform[0][2]) &&
+        Number.isFinite(layout.relativeTransform[1][0]) &&
+        Number.isFinite(layout.relativeTransform[1][1]) &&
+        Number.isFinite(layout.relativeTransform[1][2]);
+}
+
+// ---- Native group restoration -------------------------------------------------
+// MasterGo GROUP layers used to be restored as a plain FRAME placeholder. Figma
+// has a real GroupNode, so we restore one by mirroring the boolean-tree shell
+// pattern: build a temporary frame carrying the group's transform so children
+// land in the right place, recurse the children into it, then figma.group() the
+// children and drop the shell. Falls back to keeping the frame if grouping
+// fails or there are no children.
+
+export function shouldRestoreGroupNode(data: any): boolean {
+    if (!data) return false;
+    if (data.receiveCreateOverride === "SVG" || data.svgFallback) return false;
+    return data.sourceType === "GROUP" &&
+        (data.type === "GROUP" || data.restoreType === "GROUP" || data.receiveCreateOverride === "GROUP");
+}
+
+export function createGroupShellFrameProps(data: any): any {
+    return {
+        ...data,
+        type: "FRAME",
+        restoreType: "FRAME",
+        receiveCreateOverride: "FRAME",
+        clipsContent: false,
+        geometry: clearGeometryPaint(data.geometry)
+    };
+}
+
+export async function restoreGroupNode(
+    nodeProps: any,
+    parent: PageNode | SceneNode,
+    layerRecord: ImportLayerRecord,
+    layers: { [id: string]: ImportLayerRecord },
+    restoredBefore: number,
+    totalNodes: number,
+    restoreNodeCallback: (nodeId: string, parent: PageNode | SceneNode, layers: { [id: string]: ImportLayerRecord }, restoredBefore: number, totalNodes: number) => Promise<number>,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>,
+    maybeReportProgressCallback: (current: number, total: number) => Promise<void>
+): Promise<number> {
+    const shell = figma.createFrame();
+    state.recordNodeCreation("container-shell");
+    const childIds = nodeProps.omitChildrenOnRestore ? [] : (layerRecord.childIds || []);
+    const shellProps = createContainerShellFrameProps(nodeProps);
+    let appended = false;
+
+    try {
+        if (!appendRestoredNode(parent, shell)) return 0;
+        appended = true;
+        await applyPropertiesCallback(shell as any, shellProps);
+    } catch (error) {
+        console.warn("Unable to create group restore shell:", nodeProps?.name || layerRecord.name, error);
+        if (appended) safeRemove(shell);
+        return 0;
+    }
+
+    let restoredCount = 1;
+    await maybeReportProgressCallback(restoredBefore + restoredCount, totalNodes);
+
+    for (const childId of childIds) {
+        restoredCount += await restoreNodeCallback(childId, shell, layers, restoredBefore + restoredCount, totalNodes);
+    }
+
+    await finalizeGroupShell(shell, nodeProps, applyPropertiesCallback);
+    return restoredCount;
+}
+
+export async function finalizeGroupShell(
+    shell: FrameNode,
+    data: any,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>
+) {
+    const parent = shell.parent;
+    const children = [...shell.children] as SceneNode[];
+
+    // No children, or nowhere to group into: keep the frame as a placeholder.
+    if (!parent || !("insertChild" in parent) || children.length < 1) {
+        safeSet(shell, "name", data.name);
+        return;
+    }
+
+    try {
+        const parentIndex = parent.children.indexOf(shell);
+        const group = figma.group(
+            children,
+            parent as BaseNode & ChildrenMixin,
+            parentIndex >= 0 ? parentIndex : parent.children.length
+        );
+        state.recordNodeCreation("group");
+        safeRemove(shell);
+        await applyPropertiesCallback(group as any, createFinalizedContainerProps(data, hasNonTranslationTransform(data?.layout)));
+        if (!hasNonTranslationTransform(data?.layout)) {
+            state.nativeGroupOffsetByNodeId[group.id] = {
+                x: Number.isFinite(group.x) ? group.x : 0,
+                y: Number.isFinite(group.y) ? group.y : 0
+            };
+        }
+    } catch (error) {
+        console.warn("Unable to create native group, keeping frame fallback:", data?.name || data?.id || "Untitled", error);
+        safeSet(shell, "name", data.name);
+    }
+}
+
+export async function restoreBooleanOperationTree(
+    nodeProps: any,
+    parent: PageNode | SceneNode,
+    layerRecord: ImportLayerRecord,
+    layers: { [id: string]: ImportLayerRecord },
+    restoredBefore: number,
+    totalNodes: number,
+    restoreNodeCallback: (nodeId: string, parent: PageNode | SceneNode, layers: { [id: string]: ImportLayerRecord }, restoredBefore: number, totalNodes: number) => Promise<number>,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>,
+    maybeReportProgressCallback: (current: number, total: number) => Promise<void>
+): Promise<number> {
+    const shell = figma.createFrame();
+    state.recordNodeCreation("container-shell");
+    const shellProps = createBooleanFrameFallbackProps(nodeProps);
+    let appended = false;
+
+    try {
+        if (!appendRestoredNode(parent, shell)) return 0;
+        appended = true;
+        await applyPropertiesCallback(shell as any, shellProps);
+    } catch (error) {
+        console.warn("Unable to create boolean restore shell:", nodeProps?.name || layerRecord.name, error);
+        if (appended) safeRemove(shell);
+        return await restoreBooleanFallbackNode(nodeProps, parent, layerRecord, restoredBefore, totalNodes, applyPropertiesCallback, maybeReportProgressCallback);
+    }
+
+    let restoredCount = 1;
+    const currentCount = restoredBefore + restoredCount;
+    await maybeReportProgressCallback(currentCount, totalNodes);
+
+    const childIds = nodeProps.omitChildrenOnRestore ? [] : (layerRecord.childIds || []);
+    for (const childId of childIds) {
+        restoredCount += await restoreNodeCallback(childId, shell, layers, restoredBefore + restoredCount, totalNodes);
+    }
+
+    const combined = await combineBooleanShell(shell, nodeProps, applyPropertiesCallback);
+    if (!combined) {
+        await restoreBooleanFallbackFromShell(shell, nodeProps, applyPropertiesCallback);
+    }
+
+    return restoredCount;
+}
+
+export async function combineBooleanShell(
+    shell: FrameNode,
+    data: any,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>
+): Promise<SceneNode | null> {
+    const parent = shell.parent;
+    if (!parent || !("insertChild" in parent)) return null;
+
+    const children = [...shell.children] as SceneNode[];
+    for (const child of children) {
+        if (child.type !== "VECTOR") continue;
+        const network = child.vectorNetwork;
+        const closed = closeCoincidentBooleanContour(network);
+        if (closed === network) continue;
+        try {
+            await child.setVectorNetworkAsync(closed);
+        } catch (error) {
+            console.warn("Unable to close coincident boolean contour:", child.name, error);
+        }
+    }
+    if (children.length === 1) {
+        return await promoteSingleBooleanChild(shell, children[0], data);
+    }
+    if (children.length < 1) {
+        console.warn("Unable to restore boolean operation because it has no children:", data?.name || data?.id || "Untitled");
+        return null;
+    }
+
+    const operation = normalizeBooleanOperation(data.booleanOperation);
+    if (!operation) {
+        console.warn("Unsupported boolean operation:", data?.booleanOperation, data?.name || data?.id || "Untitled");
+        return null;
+    }
+    try {
+        const booleanChildren = flattenStrokeOnlyBooleanChildren(children, shell);
+        const combined = createBooleanContainerNode(operation, booleanChildren, shell, parent);
+        await applyPropertiesCallback(combined as any, data);
+        safeRemove(shell);
+        return combined;
+    } catch (error) {
+        console.warn("Unable to combine boolean operation, falling back:", data?.name || data?.id || "Untitled", error);
+        return null;
+    }
+}
+
+export function flattenStrokeOnlyBooleanChildren(children: SceneNode[], parent: BaseNode & ChildrenMixin): SceneNode[] {
+    const result: SceneNode[] = [];
+
+    for (const child of children) {
+        if (!shouldFlattenBooleanChild(child)) {
+            result.push(child);
+            continue;
+        }
+
+        try {
+            const index = parent.children.indexOf(child);
+            const flattened = figma.flatten([child], parent, index >= 0 ? index : parent.children.length);
+            result.push(flattened);
+        } catch (error) {
+            console.warn("Unable to flatten stroked boolean child, keeping original:", child.name, error);
+            result.push(child);
+        }
+    }
+
+    return result;
+}
+
+export function shouldFlattenBooleanChild(node: SceneNode): boolean {
+    if (!isStrokeOnlyWithoutVisibleFill(node)) return false;
+    return hasClosedVectorRegion(node);
+}
+
+function hasClosedVectorRegion(node: SceneNode): boolean {
+    const vectorNetwork = (node as any).vectorNetwork;
+    return !!vectorNetwork && Array.isArray(vectorNetwork.regions) && vectorNetwork.regions.length > 0;
+}
+
+function isStrokeOnlyWithoutVisibleFill(node: SceneNode): boolean {
+    if (!("strokes" in node)) return false;
+    const strokes = (node as any).strokes;
+    if (!Array.isArray(strokes) || strokes.length === 0) return false;
+    if (!("fills" in node)) return true;
+    const fills = (node as any).fills;
+    return !Array.isArray(fills) || fills.length === 0 || fills.every((fill: any) => !fill || fill.visible === false);
+}
+
+export function createBooleanContainerNode(
+    operation: "UNION" | "SUBTRACT" | "INTERSECT" | "EXCLUDE",
+    children: SceneNode[],
+    shell: FrameNode,
+    parent: BaseNode & ChildrenMixin
+): BooleanOperationNode {
+    const parentIndex = parent.children.indexOf(shell);
+    const operationNode = figma.createBooleanOperation();
+    state.recordNodeCreation("boolean");
+    safeSet(operationNode, "booleanOperation", operation);
+    (parent as any).insertChild(parentIndex >= 0 ? parentIndex : parent.children.length, operationNode);
+
+    for (const child of children) {
+        operationNode.appendChild(child);
+    }
+
+    return operationNode;
+}
+
+export async function promoteSingleBooleanChild(
+    shell: FrameNode,
+    child: SceneNode,
+    data: any
+): Promise<SceneNode | null> {
+    const parent = shell.parent;
+    if (!parent || !("insertChild" in parent)) return null;
+
+    try {
+        const parentIndex = parent.children.indexOf(shell);
+        const transform = composeSingleBooleanChildTransform(shell, child, data);
+        (parent as any).insertChild(parentIndex >= 0 ? parentIndex : parent.children.length, child);
+        if (transform) safeSet(child, "relativeTransform", transform);
+        safeSet(child, "name", data?.name || child.name);
+        applyOuterBooleanPaint(child, data);
+        safeRemove(shell);
+        return child;
+    } catch (error) {
+        console.warn("Unable to promote single-child boolean operation:", data?.name || data?.id || "Untitled", error);
+        return null;
+    }
+}
+
+// A Figma boolean node renders with ITS OWN paint. MasterGo nests booleans with
+// the paint on the OUTER one (Mobile Signal/Wifi status icons: outer EXCLUDE
+// carries the solid, inner EXCLUDE carries none). The outer paint also wins
+// when the inner boolean has a different fill, as in the 0915 ellipsis icon.
+function applyOuterBooleanPaint(child: SceneNode, data: any) {
+    if (!("fills" in child) || !("strokes" in child)) return;
+    const geometry = data && data.geometry;
+    const outerFills = geometry && geometry.fills;
+    if (!geometry) return;
+    if (Array.isArray(outerFills) && outerFills.some((f: any) => f && f.visible !== false)) {
+        safeSetFills(child, normalizeImageFills(outerFills, child, data.layout));
+    }
+    const outerStrokes = geometry.strokes;
+    if (Array.isArray(outerStrokes) && outerStrokes.length > 0) {
+        safeSetStrokes(child, normalizeImageStrokes(outerStrokes, child, data.layout));
+        if (geometry.strokeWeight !== undefined) safeSet(child, "strokeWeight", geometry.strokeWeight);
+        if (geometry.strokeAlign !== undefined) safeSet(child, "strokeAlign", geometry.strokeAlign);
+    }
+}
+
+export function composeSingleBooleanChildTransform(shell: FrameNode, child: SceneNode, data: any): Transform | null {
+    const parentTransform = data?.layout?.relativeTransform || (shell as any).relativeTransform;
+    const childTransform = (child as any).relativeTransform;
+    if (!hasFiniteTransform(parentTransform) || !hasFiniteTransform(childTransform)) return null;
+    return multiplyTransforms(parentTransform, childTransform);
+}
+
+type Transform = [[number, number, number], [number, number, number]];
+
+export function multiplyTransforms(parent: Transform, child: Transform): Transform {
+    return [
+        [
+            parent[0][0] * child[0][0] + parent[0][1] * child[1][0],
+            parent[0][0] * child[0][1] + parent[0][1] * child[1][1],
+            parent[0][0] * child[0][2] + parent[0][1] * child[1][2] + parent[0][2]
+        ],
+        [
+            parent[1][0] * child[0][0] + parent[1][1] * child[1][0],
+            parent[1][0] * child[0][1] + parent[1][1] * child[1][1],
+            parent[1][0] * child[0][2] + parent[1][1] * child[1][2] + parent[1][2]
+        ]
+    ];
+}
+
+export async function restoreBooleanFallbackFromShell(
+    shell: FrameNode,
+    data: any,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>
+) {
+    const parent = shell.parent;
+    if (!parent || !("insertChild" in parent)) return;
+
+    state.booleanFallbackCount++;
+    await applyPropertiesCallback(shell as any, createBooleanFrameFallbackProps(data));
+}
+
+export async function restoreBooleanFallbackNode(
+    data: any,
+    parent: PageNode | SceneNode,
+    layerRecord: ImportLayerRecord,
+    restoredBefore: number,
+    totalNodes: number,
+    applyPropertiesCallback: (node: any, data: any) => Promise<void>,
+    maybeReportProgressCallback: (current: number, total: number) => Promise<void>
+): Promise<number> {
+    state.booleanFallbackCount++;
+    const fallbackNode = figma.createFrame();
+    state.recordNodeCreation("boolean-fallback");
+    const fallbackProps = createBooleanFrameFallbackProps(data);
+
+    try {
+        if (!appendRestoredNode(parent, fallbackNode)) return 0;
+        await applyPropertiesCallback(fallbackNode as any, fallbackProps);
+    } catch (error) {
+        console.warn("Unable to restore boolean fallback:", data?.name || layerRecord.name, error);
+        safeRemove(fallbackNode);
+        return 0;
+    }
+
+    const currentCount = restoredBefore + 1;
+    await maybeReportProgressCallback(currentCount, totalNodes);
+
+    return 1;
+}

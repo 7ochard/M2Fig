@@ -1,0 +1,590 @@
+:root {
+  color-scheme: dark;
+  font-family: "Stack Sans Text", "Noto Sans SC", "Inter", "Segoe UI Variable Display", "Microsoft YaHei UI", sans-serif;
+  font-size: 12px;
+  color: #ffffff;
+  background: #121212;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 0;
+  background: #121212;
+  color: #ffffff;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-app-region: no-drag;
+}
+
+::selection {
+  background: #c5b0f4;
+  color: #1a1a1a;
+}
+
+:focus-visible {
+  outline: 1.5px solid #c5b0f4;
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+h2 {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  color: #ffffff;
+}
+
+/* 标题栏 · 40 (24:122) */
+.title-bar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 138px 0 20px;
+  background: #121212;
+  border-bottom: 1px solid #2b2b2b;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: #b5b5b5;
+}
+
+.brand img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+/* 工作区 · 横向自动布局 (24:141) */
+.workspace {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 17px 20px 20px;
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 卡片通用 (#1a1a1a, border #2b2b2b, rounded 16px) */
+.card {
+  background: #1a1a1a;
+  border: 1px solid #2b2b2b;
+  border-radius: 16px;
+  min-width: 0;
+}
+
+/* 01 · 来源与目标 (24:143) */
+.source-card {
+  padding: 18px 19px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.source-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+}
+
+.source-note {
+  position: relative;
+}
+
+.source-note summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.source-note summary::-webkit-details-marker {
+  display: none;
+}
+
+.source-note summary img {
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+
+.source-note p {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 260px;
+  z-index: 30;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #232323;
+  border: 1px solid #2b2b2b;
+  color: #b5b5b5;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.link-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.link-box {
+  background: #141414;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.link-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.link-box-head label {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  color: #ffffff;
+  min-width: 0;
+  flex: 1;
+}
+
+.chip-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background: #1a1a1a;
+  border: 1px solid #202020;
+  color: #777777;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+textarea {
+  width: 100%;
+  height: 48px;
+  min-height: 48px;
+  padding: 9px 10px;
+  background: #1a1a1a;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 11px;
+  line-height: 18px;
+  resize: none;
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: #777777;
+  opacity: 1;
+}
+
+textarea:focus,
+input:focus {
+  outline: none;
+  border-color: #c5b0f4;
+}
+
+textarea[aria-invalid="true"] {
+  border-color: #ef4444;
+}
+
+/* 下半部分两栏 (24:245) — 301 : 339 比例 */
+.bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 301fr) minmax(300px, 339fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.left-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* 02 · 保存目录 (24:217) */
+.dir-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-group {
+  padding: 16px 19px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 22px;
+  color: #ffffff;
+}
+
+.status-group[data-state="error"] .status-title {
+  color: #f87171;
+}
+
+.progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #2b2b2b;
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  width: 45%;
+  height: 100%;
+  background: #c5b0f4;
+}
+
+.dir-group {
+  padding: 16px 19px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.quick-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dir-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  background: #141414;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+}
+
+.desc-text {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  color: #b5b5b5;
+}
+
+/* 04 · Figma 插件 (24:229) */
+.plugin-card {
+  padding: 16px 19px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.manifest-box {
+  height: 36px;
+  padding: 0 12px;
+  background: #141414;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.manifest-box code {
+  display: block;
+  width: 100%;
+  font-family: "Stack Sans Text", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 18px;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.desc-subtle {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
+  color: #a0a0a0;
+}
+
+/* 03 · 处理记录 (24:163) */
+.log-card {
+  padding: 16px 19px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.zlib-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background: #1a1a1a;
+  border: 1px solid #2b2b2b;
+  color: #dddddd;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.log-box {
+  flex: 1;
+  min-height: 280px;
+  padding: 12px;
+  background: #141414;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.log-empty {
+  font-size: 12px;
+  line-height: 20px;
+  color: #a0a0a0;
+}
+
+pre {
+  margin: 0;
+  flex: 1;
+  overflow: auto;
+  color: #e5e5e5;
+  font: 11.5px/1.55 "Consolas", "Microsoft YaHei UI", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.log-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.footer-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background: #1a1a1a;
+  border: 1px solid #2b2b2b;
+  color: #b5b5b5;
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+}
+
+/* 按钮体系 (Mirrors Figma M2Fig/Button/* components, all >= 36px height) */
+.button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* 开始导出 ZIP (24:272) */
+.btn-primary {
+  width: 100%;
+  height: 40px;
+  padding: 0 13px;
+  border-radius: 20px;
+  background: #c5b0f4;
+  color: #1a1a1a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #d2c1f7;
+}
+
+/* 选择目录 (24:227) & 复制路径 (24:234) */
+.btn-white {
+  height: 38px;
+  padding: 0 20px;
+  border-radius: 19px;
+  background: #ffffff;
+  color: #000000;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.btn-white.btn-sm {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 18px;
+}
+
+.btn-white:hover:not(:disabled) {
+  background: #e6e6e6;
+}
+
+/* 默认目录 (24:223) */
+.btn-dark {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 18px;
+  background: #232323;
+  border-color: #2b2b2b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.btn-dark:hover:not(:disabled) {
+  background: #2c2c2c;
+}
+
+/* 打开目录 (24:224) */
+.btn-dark-muted {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 18px;
+  background: #1e1e1e;
+  border-color: #232323;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.btn-dark-muted:disabled {
+  color: #777777;
+}
+
+.btn-dark-muted:hover:not(:disabled) {
+  background: #282828;
+}
+
+/* 唤醒 MasterGo 桌面端 (24:248) */
+.btn-chip {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background: #1a1a1a;
+  border-color: #202020;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.btn-chip:disabled {
+  color: #777777;
+}
+
+.btn-chip-lilac {
+  background: #c5b0f4;
+  border-color: #c5b0f4;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.button:disabled {
+  cursor: default;
+}

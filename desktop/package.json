@@ -1,0 +1,51 @@
+{
+  "name": "mg2fig-desktop",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Mg2Fig V3 · MasterGo → Figma 本地整文件迁移工具",
+  "author": "Aaron Xu (upstream MasterGo2Figma); Mg2Fig contributors",
+  "license": "CC-BY-NC-SA-4.0",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "build": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.65.0"
+  },
+  "build": {
+    "appId": "local.mastergo.figma.bridge",
+    "productName": "Mg2Fig",
+    "directories": {
+      "output": "../dist/desktop-v3"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "job-runner.cjs",
+      "assets/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bridge-runtime.json",
+        "to": "bridge-runtime.json"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": "portable",
+      "artifactName": "Mg2Fig.exe",
+      "icon": "assets/m2fig.ico",
+      "signAndEditExecutable": true,
+      "signExecutable": false
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    }
+  }
+}

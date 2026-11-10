@@ -1,0 +1,30 @@
+mastergo2figma-relay-output/
+SendToFigma/.DS_Store
+.DS_Store
+mastergo2figma-*.zip
+测试集/
+.claude/worktrees/
+.claude/settings.local.json
+node_modules/
+artifacts/
+dist/
+/MasterGo Figma Bridge.exe
+/MasterGo Figma Bridge R4.exe
+/M2Fig.exe
+/Mg2Fig.exe
+/desktop/bridge-runtime.json
+/bridge-runtime.json
+/desktop/bridge-runtime.portable.json
+.venv/
+__pycache__/
+*.pyc
+.trae/
+.codex/
+.antigravitycli/
+.screenshots/
+output/
+*.mg
+*.zip
+.env
+.env.*
+!.env.example

@@ -1,0 +1,19 @@
+{
+  "name": "Mg2Fig V3",
+  "id": "2712095548761342",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": [
+    "figma"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:8765"
+    ]
+  },
+  "documentAccess": "dynamic-page"
+}
