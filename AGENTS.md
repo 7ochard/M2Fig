@@ -11,7 +11,7 @@ Third-party dependencies keep their own license notices.
 - Test: node --test tools/tests/*.test.js; cd desktop and run npm test.
 - Build both plugins with npm ci and npm run build in their respective directories.
 - Package: powershell -File tools/packageMg2FigV3.ps1.
-- Desktop setup: SetupM2Fig.cmd. Runtime paths are generated locally; never commit them.
+- Desktop setup: SetupMg2Fig.cmd. Runtime paths are generated locally; never commit them.
 - Use synthetic test fixtures. Never commit design files, client names, caches, logs or credentials.
 - Preserve local work; do not reset or recursively delete user directories.
 - Do not claim a real GUI or design migration test from static checks alone.

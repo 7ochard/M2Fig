@@ -215,14 +215,14 @@ function runtime() {
   try {
     config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
   } catch {
-    throw new Error('无法读取本机运行配置。请在完整 M2Fig 目录运行 SetupM2Fig.cmd 后重试。');
+    throw new Error('无法读取本机运行配置。请在完整 M2Fig 目录运行 SetupMg2Fig.cmd 后重试。');
   }
   if (!config || typeof config !== 'object' || Array.isArray(config) || config.portable === true) {
-    throw new Error('请先在完整 M2Fig 目录运行 SetupM2Fig.cmd，初始化本机 Python、Node.js 和插件路径。');
+    throw new Error('请先在完整 M2Fig 目录运行 SetupMg2Fig.cmd，初始化本机 Python、Node.js 和插件路径。');
   }
   for (const key of ['repoRoot', 'python', 'node']) {
     if (typeof config[key] !== 'string' || !path.isAbsolute(config[key]) || !fs.existsSync(config[key])) {
-      throw new Error(`运行文件缺失：${key}。请保留完整工程及本机运行时，运行 SetupM2Fig.cmd 更新本机配置。`);
+      throw new Error(`运行文件缺失：${key}。请保留完整工程及本机运行时，运行 SetupMg2Fig.cmd 更新本机配置。`);
     }
   }
   if (Object.prototype.hasOwnProperty.call(config, 'pluginManifest')) {
@@ -257,7 +257,7 @@ function handle(name, callback) {
 
 async function createWindow() {
   const config = runtime();
-  const allowedFiles = new Set(['index.html', 'styles.css', 'app.js', 'assets/m2fig-logo-20.svg', 'assets/m2fig-logo-24.svg', 'assets/info-button.svg', 'assets/details-marker.svg']);
+  const allowedFiles = new Set(['index.html', 'styles.css', 'app.js', 'assets/mg2fig-logo-20.svg', 'assets/mg2fig-logo-24.svg', 'assets/info-button.svg', 'assets/details-marker.svg']);
   protocol.handle('bridge', (request) => {
     const url = new URL(request.url);
     const name = url.pathname.slice(1);
@@ -269,7 +269,7 @@ async function createWindow() {
   session.defaultSession.setPermissionCheckHandler(() => false);
   window = new BrowserWindow({
     width: 694, height: 707, minWidth: 694, minHeight: 680, useContentSize: true,
-    title: 'Mg2Fig · 本地迁移工具', icon: path.join(__dirname, 'assets', 'm2fig.ico'), backgroundColor: '#121212', show: false,
+    title: 'Mg2Fig · 本地迁移工具', icon: path.join(__dirname, 'assets', 'mg2fig.ico'), backgroundColor: '#121212', show: false,
     autoHideMenuBar: true, titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#121212', symbolColor: '#cfcfcf', height: 40 },
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true },

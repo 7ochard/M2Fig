@@ -1,4 +1,4 @@
-<img src="assets/m2fig-readme-banner.png" alt="M2Fig" width="100%">
+<img src="assets/mg2fig-readme-banner.png" alt="M2Fig" width="100%">
 
 # Mg2Fig [R5 Desktop - V3 Pipeline]
 
@@ -24,7 +24,7 @@
 当前验证环境为 Windows、Node.js 24、Python 3.13。首次使用流程：
 
 1. 安装 Node.js 24 与 Python 3.13 [包含 pip]。
-2. 双击 `SetupM2Fig.cmd`，初始化导出依赖并生成本机运行配置 [首次安装需联网]。
+2. 双击 `SetupMg2Fig.cmd`，初始化导出依赖并生成本机运行配置 [首次安装需联网]。
 3. 在已登录的 MasterGo 桌面客户端打开源文件一次，等待完整加载以生成本地缓存快照。
 4. 启动 `Mg2Fig.exe`，填入 MasterGo 文件链接与可选的 Figma 目标文件链接，选择保存目录后点击 **开始导出 ZIP**。
 5. 在 Figma Desktop 打开目标设计文件，依次选择 **Plugins -> Development -> Import plugin from manifest...**，载入 `dist/Mg2Fig-v3-local/manifest.json`。

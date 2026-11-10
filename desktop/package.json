@@ -40,7 +40,7 @@
     "win": {
       "target": "portable",
       "artifactName": "Mg2Fig.exe",
-      "icon": "assets/m2fig.ico",
+      "icon": "assets/mg2fig.ico",
       "signAndEditExecutable": true,
       "signExecutable": false
     },

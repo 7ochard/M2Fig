@@ -111,8 +111,8 @@ test("packaged runtime uses the executable directory outside the portable launch
 test("an invalid sidecar does not fall back to a valid embedded runtime", () => {
   const current = path.join(runtimeRoot, "dist/M2Fig-r4-local/manifest.json");
   const sidecar = path.join(runtimeRoot, "bridge-runtime.json");
-  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [sidecar]: "invalid JSON" } }), /SetupM2Fig\.cmd/);
-  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [sidecar]: JSON.stringify({ portable: true }) } }), /先.*SetupM2Fig\.cmd/);
+  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [sidecar]: "invalid JSON" } }), /SetupMg2Fig\.cmd/);
+  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [sidecar]: JSON.stringify({ portable: true }) } }), /先.*SetupMg2Fig\.cmd/);
   const r3 = path.join(runtimeRoot, "dist/MasterGo-Figma-Bridge-local/manifest.json");
   const wrongPluginConfig = { repoRoot: runtimeRoot, python: path.join(runtimeRoot, "python.exe"), node: path.join(runtimeRoot, "node.exe"), pluginManifest: r3 };
   assert.throws(() => runtimeFor({}, [current, r3], { [r3]: JSON.stringify({ id: "1662512589841230294" }) }, { isPackaged: true, configFiles: { [sidecar]: JSON.stringify(wrongPluginConfig) } }), /不是 Mg2Fig V3/);
@@ -121,7 +121,7 @@ test("an invalid sidecar does not fall back to a valid embedded runtime", () => 
 test("a portable template requires local setup while a legacy embedded runtime still works", () => {
   const current = path.join(runtimeRoot, "dist/M2Fig-r4-local/manifest.json");
   const embedded = path.join(runtimeRoot, "resources/bridge-runtime.json");
-  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [embedded]: JSON.stringify({ portable: true }) } }), /先.*SetupM2Fig\.cmd/);
+  assert.throws(() => runtimeFor({}, [current], {}, { isPackaged: true, configFiles: { [embedded]: JSON.stringify({ portable: true }) } }), /先.*SetupMg2Fig\.cmd/);
   assert.equal(runtimeFor({}, [current], {}, { isPackaged: true }).pluginManifest, current);
 });
 

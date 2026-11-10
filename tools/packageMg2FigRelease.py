@@ -16,7 +16,7 @@ SOURCE_DIRS = {
 }
 ROOT_FILES = {
     "README.md", "LICENSE", "ATTRIBUTION.md", "requirements.txt", ".gitignore",
-    ".gitattributes", "SetupM2Fig.cmd", "启动迁移工具.cmd",
+    ".gitattributes", "SetupMg2Fig.cmd", "启动迁移工具.cmd",
 }
 PUBLIC_DOCS = {
     "BRIDGE_VERIFICATION.md", "CACHED_IMAGE_VALIDATION.md", "LOCAL_EXPORT_GUI.md",
@@ -66,7 +66,7 @@ Third-party dependencies keep their own license notices.
 - Test: node --test tools/tests/*.test.js; cd desktop and run npm test.
 - Build both plugins with npm ci and npm run build in their respective directories.
 - Package: powershell -File tools/packageMg2FigV3.ps1.
-- Desktop setup: SetupM2Fig.cmd. Runtime paths are generated locally; never commit them.
+- Desktop setup: SetupMg2Fig.cmd. Runtime paths are generated locally; never commit them.
 - Use synthetic test fixtures. Never commit design files, client names, caches, logs or credentials.
 - Preserve local work; do not reset or recursively delete user directories.
 - Do not claim a real GUI or design migration test from static checks alone.
@@ -80,8 +80,8 @@ These M2Fig brand assets are supplied by this project's maintainer.
 The dark and light SVG/PNG originals are retained for editing. No system font files
 are distributed here. Third-party trademarks remain with their respective owners.
 
-The Windows application uses m2fig.ico, generated from m2fig-dark.png.
-From the repository root run python tools/buildM2FigIcons.py to regenerate
+The Windows application uses mg2fig.ico, generated from mg2fig-dark.png.
+From the repository root run python tools/buildMg2FigIcons.py to regenerate
 16, 20, 24, 32, 48, 64, 128 and 256 pixel ICO entries, then rebuild the desktop app.
 """
 
@@ -124,7 +124,7 @@ def source_allowed(path):
         return name in ROOT_FILES or name == "AGENTS.md"
     if path.parts[:2] == ("docs", "public"):
         return len(path.parts) == 3 and path.name in PUBLIC_DOCS
-    if name in {"assets/m2fig-readme-banner.png", "assets/mg2fig-r5-v3-preview.png"}:
+    if name in {"assets/mg2fig-readme-banner.png", "assets/mg2fig-r5-v3-preview.png"}:
         return True
     if path.parts[0] not in SOURCE_DIRS:
         return False
@@ -180,7 +180,7 @@ def make_source(output):
             raise ValueError("Source output must be outside the published source directories.")
     names = set(ROOT_FILES)
     names.update(f"docs/public/{name}" for name in PUBLIC_DOCS)
-    names.add("assets/m2fig-readme-banner.png")
+    names.add("assets/mg2fig-readme-banner.png")
     names.add("assets/mg2fig-r5-v3-preview.png")
     for directory in SOURCE_DIRS:
         if not (ROOT / directory).is_dir():

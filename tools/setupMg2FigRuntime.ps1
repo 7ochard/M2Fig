@@ -29,15 +29,15 @@ if (-not ($CheckOnly -or $SkipInstall)) {
   } finally { Pop-Location }
 }
 & $taskPython -c 'import brotli; from PIL import Image'
-if ($LASTEXITCODE -ne 0) { throw 'Brotli or Pillow is missing. Run SetupM2Fig.cmd without SkipInstall.' }
+if ($LASTEXITCODE -ne 0) { throw 'Brotli or Pillow is missing. Run SetupMg2Fig.cmd without SkipInstall.' }
 foreach ($taskRelative in @('tools/desktop_bridge_worker.py', 'tools/local_bridge_export.py', 'tools/readMasterGoCache.py', 'tools/convertCachedMasterGo.js', 'tools/inspectLargeBridgePackage.js')) {
   if (-not (Test-Path -LiteralPath (Join-Path $taskRoot $taskRelative) -PathType Leaf)) { throw "Backend source is missing: $taskRelative" }
 }
 & $taskNode -e "const p=require('node:path'),fs=require('node:fs'),r=process.argv[1];const e=require(p.join(r,'ReceiveFromMasterGo/node_modules/esbuild'));e.transformSync('const ready = true',{loader:'js'});const h=p.join(r,'ReceiveFromMasterGo/node_modules/heic-to/src/lib/libheif-without-unsafe-eval.js');if(!fs.existsSync(h))throw new Error('heic-to runtime is missing');" $taskRoot
-if ($LASTEXITCODE -ne 0) { throw 'Receiving plugin dependencies are missing or incompatible. Run SetupM2Fig.cmd without SkipInstall.' }
+if ($LASTEXITCODE -ne 0) { throw 'Receiving plugin dependencies are missing or incompatible. Run SetupMg2Fig.cmd without SkipInstall.' }
 $taskManifestPath = Join-Path $taskRoot 'dist/Mg2Fig-v3-local/manifest.json'
 if (-not (Test-Path -LiteralPath $taskManifestPath -PathType Leaf)) {
-  if ($CheckOnly) { throw 'The prebuilt plugin is missing. Run SetupM2Fig.cmd to prepare it.' }
+  if ($CheckOnly) { throw 'The prebuilt plugin is missing. Run SetupMg2Fig.cmd to prepare it.' }
   & (Join-Path $taskRoot 'tools/packageMg2FigV3.ps1')
 }
 $taskManifest = Get-Content -LiteralPath $taskManifestPath -Raw -Encoding utf8 | ConvertFrom-Json

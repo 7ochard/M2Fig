@@ -14,8 +14,8 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "93f49f13a979769055ed84230596c4a1c70e150612f05da55779f3b4026aac24",
-      "size": 1309
+      "sha256": "95deb30734da9ca99981251b9a70b680a015291d642c83957ee8534402e0a7cb",
+      "size": 1310
     },
     {
       "path": "ATTRIBUTION.md",
@@ -29,8 +29,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "a25097232a3f5383aebc9f1363a593a9add1b8c8500b53f2b0dab581acf74227",
-      "size": 6144
+      "sha256": "c7c7525f4be474138d262740b407caf04db2955cfdbd81fd81889873b496b5b8",
+      "size": 6146
     },
     {
       "path": "ReceiveFromMasterGo/README.md",
@@ -443,14 +443,9 @@
       "size": 85448
     },
     {
-      "path": "SetupM2Fig.cmd",
-      "sha256": "022ff159b06644c61e3041c149df570a7ce62a39e968d22aea8b3ad24f752b89",
-      "size": 303
-    },
-    {
-      "path": "assets/m2fig-readme-banner.png",
-      "sha256": "3de9807be5432f5fe2a6589a2b0de7f00fda9ffeb096cbabc437513c3539a4bd",
-      "size": 28667
+      "path": "SetupMg2Fig.cmd",
+      "sha256": "584d908571147d07056effb13fec2a76d3ac9354854ea74837ef81723d435fff",
+      "size": 304
     },
     {
       "path": "assets/mg2fig-r5-v3-preview.png",
@@ -458,32 +453,37 @@
       "size": 167785
     },
     {
-      "path": "desktop/assets/README.md",
-      "sha256": "37253cac9b20c9eff89f608a2770c0910d14afd2226615b085a154eedc1417d7",
-      "size": 557
+      "path": "assets/mg2fig-readme-banner.png",
+      "sha256": "3de9807be5432f5fe2a6589a2b0de7f00fda9ffeb096cbabc437513c3539a4bd",
+      "size": 28667
     },
     {
-      "path": "desktop/assets/m2fig-dark.png",
+      "path": "desktop/assets/README.md",
+      "sha256": "a41dff1982886a2ae122958f8e8d2c862d91ff64fc4ae8c33c59ab24162f8fec",
+      "size": 563
+    },
+    {
+      "path": "desktop/assets/mg2fig-dark.png",
       "sha256": "6809d2a631f27bcf9c3b24e9f64221bfd88a30ecd2e29b2ffcd0caec8b7f1737",
       "size": 625439
     },
     {
-      "path": "desktop/assets/m2fig-dark.svg",
+      "path": "desktop/assets/mg2fig-dark.svg",
       "sha256": "f30c5292a041b5530cd75bdb7e9a2139be8fc03708298c1cc6d56d380d705c0f",
       "size": 2704
     },
     {
-      "path": "desktop/assets/m2fig-light.png",
+      "path": "desktop/assets/mg2fig-light.png",
       "sha256": "bf0c6b095ab4bd12f97c231b06d8334b687a4f2bc9781813bee64ba384338ad7",
       "size": 595871
     },
     {
-      "path": "desktop/assets/m2fig-light.svg",
+      "path": "desktop/assets/mg2fig-light.svg",
       "sha256": "196594ed574b064c9219ac4672f710854b5fac3cb244ad7641b5b8c37a3c73b1",
       "size": 2724
     },
     {
-      "path": "desktop/assets/m2fig.ico",
+      "path": "desktop/assets/mg2fig.ico",
       "sha256": "83dbad85f2422f3c52e6e8250152849b8ff6b89cd244dbe711c81a945c995792",
       "size": 53431
     },
@@ -494,8 +494,8 @@
     },
     {
       "path": "desktop/main.cjs",
-      "sha256": "2e5865b870561405e5c1e857d33d6cb25c259005270ec8a88a032ff8acc074d1",
-      "size": 16307
+      "sha256": "843e1f9de5bfe811429ccfb4af3e4a7c455c27c508dd51704182a8446115c315",
+      "size": 16313
     },
     {
       "path": "desktop/package-lock.json",
@@ -504,8 +504,8 @@
     },
     {
       "path": "desktop/package.json",
-      "sha256": "57e13fd84b4f3eeb10c53e220fde8785a177b3fc2939002286b668e4ac89d687",
-      "size": 1235
+      "sha256": "e391860ef07408cf00e01d551e03d8a920866a385ed32b30a1396cce59535edf",
+      "size": 1236
     },
     {
       "path": "desktop/preload.cjs",
@@ -528,19 +528,19 @@
       "size": 546
     },
     {
-      "path": "desktop/renderer/assets/m2fig-logo-20.svg",
+      "path": "desktop/renderer/assets/mg2fig-logo-20.svg",
       "sha256": "31d37fb4b8054e01c196dc65cec59163955a75d83e0dd0f221a75054828e38c9",
       "size": 3018
     },
     {
-      "path": "desktop/renderer/assets/m2fig-logo-24.svg",
+      "path": "desktop/renderer/assets/mg2fig-logo-24.svg",
       "sha256": "3dd9ec4e3ed91ea39206bb40343995b74bc33d40c01d9f0fd498b51c3e0ba195",
       "size": 2824
     },
     {
       "path": "desktop/renderer/index.html",
-      "sha256": "089bad733f19575686fdedab44ca8bba8a609a816bb0a0c4891053f319bd0f2b",
-      "size": 6189
+      "sha256": "7f0b7980c08ecda9ba1bf98897c12ba2c4452b7e266df87ad5874fdf80a4f771",
+      "size": 6190
     },
     {
       "path": "desktop/renderer/styles.css",
@@ -559,8 +559,8 @@
     },
     {
       "path": "desktop/tests/renderer.test.cjs",
-      "sha256": "5ecc4c298d72aa515bffa0e7a3594578df7e0920e21420f150834d899fa99c69",
-      "size": 16781
+      "sha256": "e4fa731dacf98aaf87ce2b62efabb268831b389d099627b185711eef43e6c7a1",
+      "size": 16784
     },
     {
       "path": "docs/public/BRIDGE_VERIFICATION.md",
@@ -673,9 +673,9 @@
       "size": 3454
     },
     {
-      "path": "tools/buildM2FigIcons.py",
-      "sha256": "d112a07b56b2d3e60c91c3a9c5aa68acda79a397fe85556c0611bdcd4f681d34",
-      "size": 838
+      "path": "tools/buildMg2FigIcons.py",
+      "sha256": "8ea526a6225b4c90b5ddb3f5c9b603d1cc601d6586fd96da0871806e243938f0",
+      "size": 841
     },
     {
       "path": "tools/compare_mg_import.js",
@@ -728,9 +728,9 @@
       "size": 169
     },
     {
-      "path": "tools/packageM2FigRelease.py",
-      "sha256": "053f5ca01bbf1eb8fb00fc1db5a3238ca048e9e1cc0de89d27c18a1144641842",
-      "size": 17287
+      "path": "tools/packageMg2FigRelease.py",
+      "sha256": "144e7e43874813eff5adcb8cdf39e7bb77eb3e8620d7bd1d03ca3f36ecdb3394",
+      "size": 17294
     },
     {
       "path": "tools/packageMg2FigV3.ps1",
@@ -758,9 +758,9 @@
       "size": 2235
     },
     {
-      "path": "tools/setupM2FigRuntime.ps1",
-      "sha256": "07612cb803f69df1c6ad1bfab5925a4fbc24e1bf823bc234edf973c94940a57a",
-      "size": 3975
+      "path": "tools/setupMg2FigRuntime.ps1",
+      "sha256": "6bab6c5267f311cf0e30c80275605441ab3d351d1b943e347e8488271cdd71fd",
+      "size": 3978
     },
     {
       "path": "tools/tests/absoluteAlignedBox.test.js",
