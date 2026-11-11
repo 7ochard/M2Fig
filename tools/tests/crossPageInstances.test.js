@@ -1,0 +1,33 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const esbuild = require('../../ReceiveFromMasterGo/node_modules/esbuild');
+const source = fs.readFileSync(require.resolve('../../ReceiveFromMasterGo/src/code.ts'),'utf8');
+const start = source.indexOf('function isComponentReady(');
+const end = source.indexOf('function countRecordDescendants(',start);
+const js = esbuild.transformSync(source.slice(start,end),{loader:'ts',target:'es2017'}).code;
+
+test('later-page master relinks the earlier shell and retains only its override subtree',async()=>{
+  const shell = {removed:false};
+  const sibling = {};
+  const parent = {children:[sibling,shell],insertChild(i,n){this.children.splice(i,0,n);n.parent=this;}};
+  shell.parent=parent;
+  const session = {deferredInstanceRelinks:{},restoredNodeById:{}, knownComponentIds:new Set(['master']), pendingComponentWork:{}};
+  const calls=[];
+  const {retry,queue} = new Function('activeImportSession','applyInstanceRecordState','safeRemove','state',js+';return {retry:retryDeferredInstanceRelinks,queue:queueDeferredInstance};')(session,async(n,r,l)=>calls.push({n,r,l}),n=>{n.removed=true;n.parent.children.splice(n.parent.children.indexOf(n),1);},{recordNodeCreation(){}});
+  const records={instance:{id:'instance',mainComponentId:'master',childIds:['text']},text:{id:'text',props:{characters:'override'},childIds:[]},unrelated:{id:'unrelated'}};
+  queue(session,records.instance,shell,records,true);
+  await retry(records);
+  assert.equal(session.deferredInstanceRelinks.master.length,1);
+  assert.deepEqual(Object.keys(session.deferredInstanceRelinks.master[0].layers),['instance','text']);
+  await retry({other:{id:'other'}});
+  assert.equal(session.deferredInstanceRelinks.master.length,1);
+  session.restoredNodeById.master={type:'COMPONENT',createInstance:()=>({type:'INSTANCE'})};
+  await retry({master:{id:'master'}});
+  assert.equal(Object.keys(session.deferredInstanceRelinks).length,0);
+  assert.equal(shell.removed,true);
+  assert.equal(parent.children[0],sibling);
+  assert.equal(parent.children[1].type,'INSTANCE');
+  assert.equal(calls[0].l.text.props.characters,'override');
+  assert.equal(session.restoredNodeById.instance,parent.children[1]);
+});

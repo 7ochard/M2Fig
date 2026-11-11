@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <title>Mg2Fig · 本地迁移工具</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="title-bar">
+      <div class="brand">
+        <img src="assets/m2fig-logo-20.svg" width="20" height="20" alt="" />
+        <span>Mg2Fig</span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <form class="board" id="export-form" novalidate>
+        <!-- 01 · 来源与目标 (24:143) -->
+        <section class="card source-card" aria-labelledby="export-heading">
+          <div class="source-header">
+            <h2 id="export-heading">双端桌面直连迁移</h2>
+            <details class="source-note">
+              <summary aria-label="快照说明"><img src="assets/info-button.svg" width="26" height="26" alt="" /></summary>
+              <p id="source-hint">首次导出前，请在已登录的 MasterGo 桌面客户端打开源文件一次。本工具读取客户端缓存并直接唤醒 Figma 桌面端。</p>
+            </details>
+          </div>
+
+          <div class="link-grid">
+            <div class="link-box">
+              <div class="link-box-head">
+                <label for="links">MasterGo 文件链接</label>
+                <button class="button btn-chip" id="open-mastergo" type="button" disabled>唤醒 MasterGo 桌面端</button>
+              </div>
+              <p class="sr-only" id="links-hint">每行一个 MasterGo 链接</p>
+              <textarea id="links" name="links" rows="1" spellcheck="false" placeholder="https://mastergo.com/file/…" aria-describedby="links-hint source-hint"></textarea>
+            </div>
+
+            <div class="link-box">
+              <div class="link-box-head">
+                <label for="figma-links">Figma 目标文件链接</label>
+                <button class="button btn-chip btn-chip-lilac" id="open-figma" type="button" hidden>调起 Figma 桌面端</button>
+                <span class="chip-tag" id="figma-ready-hint">AUTO WAKE</span>
+              </div>
+              <p class="sr-only" id="figma-links-hint">可选，填入后自动唤醒 Figma 桌面端</p>
+              <textarea id="figma-links" name="figmaLinks" rows="1" spellcheck="false" placeholder="https://www.figma.com/design/… " aria-describedby="figma-links-hint"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <!-- 下半部分两栏 (24:245) -->
+        <div class="bottom-grid">
+          <!-- 左列：02 保存目录 + 04 Figma 插件 (24:210) -->
+          <div class="left-stack">
+            <section class="card dir-card" aria-labelledby="output-heading">
+              <div class="status-group" id="task-status" data-state="idle">
+                <p class="status-title" id="status" role="status" aria-live="polite">填写链接并选择保存目录，即可导出。</p>
+                <div class="progress" id="progress" role="progressbar" aria-label="正在导出，耗时取决于文件大小" hidden><span></span></div>
+                <button class="button btn-primary" id="start-export" type="submit" disabled>开始导出 ZIP</button>
+              </div>
+
+              <div class="dir-group">
+                <div class="section-row">
+                  <h2 id="output-heading">保存目录</h2>
+                  <div class="quick-btns">
+                    <button class="button btn-dark" id="use-default-dir" type="button" disabled>默认目录</button>
+                    <button class="button btn-dark-muted" id="open-output" type="button" disabled>打开目录</button>
+                  </div>
+                </div>
+
+                <div class="dir-input-row">
+                  <input id="output-dir" name="outputDir" type="text" readonly placeholder="选择迁移 ZIP 的保存位置" aria-labelledby="output-heading" aria-describedby="output-hint" />
+                  <button class="button btn-white" id="choose-directory" type="button" disabled>选择目录</button>
+                </div>
+
+                <p class="desc-text" id="output-hint">每个源文件生成独立 V3 ZIP，自动挂载至本地直连队列。</p>
+              </div>
+            </section>
+
+            <section class="card plugin-card" aria-labelledby="guide-heading">
+              <div class="section-row">
+                <h2 id="guide-heading">插件 Manifest</h2>
+                <button class="button btn-white btn-sm" id="copy-plugin" type="button" disabled>复制路径</button>
+              </div>
+
+              <div class="manifest-box">
+                <code id="plugin-path" tabindex="0">正在读取本地插件位置…</code>
+              </div>
+
+              <p class="desc-subtle">Figma Desktop → Plugins → Development → Import plugin from manifest…</p>
+            </section>
+          </div>
+
+          <!-- 右列：03 处理记录 (24:163) -->
+          <section class="card log-card" aria-labelledby="records-heading">
+            <div class="section-row">
+              <h2 id="records-heading">处理记录</h2>
+              <span class="zlib-pill">V3 NATIVE ZLIB</span>
+            </div>
+
+            <div class="log-box">
+              <p class="log-empty" id="log-empty">填入链接点击（开始导出 ZIP）等待任务启动 </p>
+              <pre id="log" tabindex="0" role="log" aria-label="本次导出处理记录" aria-live="off" hidden></pre>
+            </div>
+
+            <div class="log-footer">
+              <div class="footer-pill">
+                <span>LOCAL BRIDGE</span>
+                <span>127.0.0.1:8765</span>
+              </div>
+              <div class="footer-pill">
+                <span>R5</span>
+                <span id="version">V3</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

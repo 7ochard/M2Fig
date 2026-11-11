@@ -1,0 +1,31 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Light">
+<g clip-path="url(#clip0_0_4)">
+<rect width="60" height="60" rx="12" fill="url(#paint0_radial_0_4)"/>
+<path id="Rectangle 6" d="M26 18C26 14.6863 28.6863 12 32 12H38V24H32C28.6863 24 26 21.3137 26 18V18Z" fill="#FF3737"/>
+<path id="Rectangle 7" d="M26 30C26 26.6863 28.6863 24 32 24H38V36H32C28.6863 36 26 33.3137 26 30V30Z" fill="#874FFF"/>
+<rect id="Rectangle 8" x="38" y="24" width="12" height="12" rx="6" fill="#00B6FF"/>
+<path id="Rectangle 9" d="M38 12H44C47.3137 12 50 14.6863 50 18V18C50 21.3137 47.3137 24 44 24H38V12Z" fill="#FF7237"/>
+<path id="Rectangle 10" d="M26 42C26 38.6863 28.6863 36 32 36H38V42C38 45.3137 35.3137 48 32 48V48C28.6863 48 26 45.3137 26 42V42Z" fill="#24CB71"/>
+<foreignObject x="6.28753" y="5.91686" width="42.1965" height="48.5861"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(2.25px);clip-path:url(#bgblur_1_0_4_clip_path);height:100%;width:100%"></div></foreignObject><path id="Vector 3" data-figma-bg-blur-radius="4.5" d="M10.937 46.2401L10.8875 14.1904C10.8829 11.1735 14.3244 9.44616 16.7406 11.2525L42.4101 30.4428C45.1177 32.4671 43.8693 36.7661 40.4986 37.0252L28.0449 37.9826C27.0875 38.0562 26.1974 38.503 25.5663 39.2267L17.3572 48.6406C15.1353 51.1886 10.9422 49.6208 10.937 46.2401Z" fill="url(#paint1_linear_0_4)" fill-opacity="0.36" stroke-width="0.2" stroke="url(#paint2_linear_0_4)"/>
+</g>
+</g>
+<defs>
+<clipPath id="bgblur_1_0_4_clip_path" transform="translate(-6.28753 -5.91686)"><path d="M10.937 46.2401L10.8875 14.1904C10.8829 11.1735 14.3244 9.44616 16.7406 11.2525L42.4101 30.4428C45.1178 32.4671 43.8693 36.7661 40.4986 37.0252L28.0449 37.9826C27.0875 38.0562 26.1974 38.503 25.5663 39.2267L17.3572 48.6406C15.1353 51.1886 10.9422 49.6208 10.937 46.2401Z"/>
+</clipPath><radialGradient id="paint0_radial_0_4" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(30 30) rotate(90) scale(30)">
+<stop stop-color="#DDDDDD"/>
+<stop offset="1" stop-color="white"/>
+</radialGradient>
+<linearGradient id="paint1_linear_0_4" x1="37.0747" y1="18.9221" x2="4.88714" y2="35.0779" gradientUnits="userSpaceOnUse">
+<stop stop-color="#3970E3" stop-opacity="0"/>
+<stop offset="1" stop-color="#3970E3"/>
+</linearGradient>
+<linearGradient id="paint2_linear_0_4" x1="37.0747" y1="18.9221" x2="4.88714" y2="35.0779" gradientUnits="userSpaceOnUse">
+<stop stop-color="white" stop-opacity="0"/>
+<stop offset="1" stop-color="#3970E3"/>
+</linearGradient>
+<clipPath id="clip0_0_4">
+<rect width="60" height="60" rx="12" fill="white"/>
+</clipPath>
+</defs>
+</svg>

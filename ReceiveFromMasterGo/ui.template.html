@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MasterGo to Figma</title>
+  <style>
+%%APP_CSS%%
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <!-- Decoder globals (window.MasterGoPackageValidation / window.MasterGoMg),
+       inlined from src/ui/* by tools/build-ui.js. Must load before the app. -->
+  <script>
+%%MASTERGO_PACKAGE_VALIDATION_JS%%
+%%MASTERGO_MG_PACKAGE_JS%%
+  </script>
+  <!-- React app bundle (ui-src/, shadcn UI + import engine). -->
+  <script>
+%%APP_JS%%
+  </script>
+</body>
+
+</html>

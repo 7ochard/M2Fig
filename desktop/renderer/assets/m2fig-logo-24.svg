@@ -1,0 +1,31 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Dark &#194;&#183; 24 px">
+<g clip-path="url(#clip0_0_11)">
+<rect width="24" height="24" rx="4.8" fill="url(#paint0_radial_0_11)"/>
+<path id="Rectangle 6" d="M10.4 7.2C10.4 5.87452 11.4745 4.8 12.8 4.8H15.2V9.6H12.8C11.4745 9.6 10.4 8.52548 10.4 7.2V7.2Z" fill="#FF3737"/>
+<path id="Rectangle 7" d="M10.4 12C10.4 10.6745 11.4745 9.6 12.8 9.6H15.2V14.4H12.8C11.4745 14.4 10.4 13.3255 10.4 12V12Z" fill="#874FFF"/>
+<rect id="Rectangle 8" x="15.2" y="9.6" width="4.8" height="4.8" rx="2.4" fill="#00B6FF"/>
+<path id="Rectangle 9" d="M15.2 4.8H17.6C18.9255 4.8 20 5.87452 20 7.2V7.2C20 8.52548 18.9255 9.6 17.6 9.6H15.2V4.8Z" fill="#FF7237"/>
+<path id="Rectangle 10" d="M10.4 16.8C10.4 15.4745 11.4745 14.4 12.8 14.4H15.2V16.8C15.2 18.1255 14.1255 19.2 12.8 19.2V19.2C11.4745 19.2 10.4 18.1255 10.4 16.8V16.8Z" fill="#24CB71"/>
+<foreignObject x="2.51501" y="2.36675" width="16.8786" height="19.4344"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(0.9px);clip-path:url(#bgblur_1_0_11_clip_path);height:100%;width:100%"></div></foreignObject><path id="Vector 3" data-figma-bg-blur-radius="1.8" d="M4.37479 18.496L4.35501 5.67615C4.35315 4.46942 5.72974 3.77846 6.69625 4.50101L16.964 12.1771C18.0471 12.9868 17.5477 14.7064 16.1994 14.8101L11.218 15.193C10.835 15.2225 10.479 15.4012 10.2265 15.6907L6.9429 19.4562C6.05414 20.4754 4.37688 19.8483 4.37479 18.496Z" fill="url(#paint1_linear_0_11)" fill-opacity="0.36" stroke-width="0.08" stroke="url(#paint2_linear_0_11)"/>
+</g>
+</g>
+<defs>
+<clipPath id="bgblur_1_0_11_clip_path" transform="translate(-2.51501 -2.36675)"><path d="M4.37479 18.496L4.35501 5.67615C4.35315 4.46942 5.72974 3.77846 6.69625 4.50101L16.964 12.1771C18.0471 12.9868 17.5477 14.7064 16.1994 14.8101L11.218 15.193C10.835 15.2225 10.479 15.4012 10.2265 15.6907L6.9429 19.4562C6.05414 20.4754 4.37688 19.8483 4.37479 18.496Z"/>
+</clipPath><radialGradient id="paint0_radial_0_11" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(12 12) rotate(90) scale(12)">
+<stop stop-color="#333333"/>
+<stop offset="1"/>
+</radialGradient>
+<linearGradient id="paint1_linear_0_11" x1="14.8299" y1="7.56882" x2="1.95486" y2="14.0312" gradientUnits="userSpaceOnUse">
+<stop stop-color="#3970E3" stop-opacity="0"/>
+<stop offset="1" stop-color="#3970E3"/>
+</linearGradient>
+<linearGradient id="paint2_linear_0_11" x1="14.8299" y1="7.56882" x2="1.95486" y2="14.0312" gradientUnits="userSpaceOnUse">
+<stop stop-color="white" stop-opacity="0"/>
+<stop offset="1" stop-color="#3970E3"/>
+</linearGradient>
+<clipPath id="clip0_0_11">
+<rect width="24" height="24" rx="4.8" fill="white"/>
+</clipPath>
+</defs>
+</svg>
